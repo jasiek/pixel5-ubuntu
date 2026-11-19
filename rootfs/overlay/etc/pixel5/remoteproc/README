@@ -1,0 +1,8 @@
+SPDX-License-Identifier: MIT
+
+A stand-in for /sys/class/remoteproc, which the downstream 4.19 kernel does
+not have (no CONFIG_REMOTEPROC; it uses msm_subsys/PIL). pd-mapper and
+tqftpserv find their files via /sys/class/remoteproc/*/firmware: the
+directory of that value under firmware_class.path (/run/pixel5-fw, set by
+pixel5-firmware-mounts). Their units bind this tree over /sys/class/remoteproc
+in their own mount namespace only.

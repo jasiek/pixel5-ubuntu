@@ -28,7 +28,7 @@ RUN chmod 600 /etc/NetworkManager/system-connections/*.nmconnection \
         ssh.service NetworkManager.service avahi-daemon.service \
         systemd-timesyncd.service systemd-resolved.service \
         serial-getty@ttyGS0.service pixel5-boot-successful.service \
-        pixel5-firmware.service \
+        pixel5-firmware.service pd-mapper.service \
     # Wifi/modem daemons stay off until Phase 4 decides how wifi comes up.
     && { systemctl disable rmtfs.service tqftpserv.service 2>/dev/null || true; } \
     # Host keys are generated on first boot (ssh.service drop-in).

@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         lz4 gzip xz-utils cpio kmod git ca-certificates curl file \
         python3 python3-protobuf device-tree-compiler \
         android-sdk-libsparse-utils e2fsprogs busybox-static \
-        libqrtr-dev libudev-dev \
+        libqrtr-dev libudev-dev liblzma-dev libzstd-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Unversioned clang/ld.lld names, as kernel Makefiles expect.

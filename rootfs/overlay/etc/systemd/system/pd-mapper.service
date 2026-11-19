@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+# pd-mapper (external/pd-mapper, built by scripts/build-qcom-daemons.sh):
+# answers the remote processors' and the kernel service locator's
+# "which protection domain runs service X" queries from the *.jsn maps in
+# /run/pixel5-fw. Must be up within 300 s of boot: the kernel's servloc gives
+# up after that for the rest of the boot.
+[Unit]
+Description=Qualcomm protection-domain mapper
+Requires=qrtr-ns.service pixel5-firmware.service
+After=qrtr-ns.service pixel5-firmware.service
+
+[Service]
+ExecStart=/usr/local/sbin/pd-mapper
+Restart=always
+RestartSec=2
+# No /sys/class/remoteproc on this kernel: see /etc/pixel5/remoteproc/README.
+TemporaryFileSystem=/sys/class
+BindReadOnlyPaths=/etc/pixel5/remoteproc:/sys/class/remoteproc
+
+[Install]
+WantedBy=multi-user.target

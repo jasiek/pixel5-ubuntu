@@ -24,6 +24,7 @@ SIZE="${ROOTFS_SIZE:-4G}"
 if [ ! -f /.dockerenv ]; then
     cd "$REPO"
     [ -f build/qbootctl/qbootctl ] || scripts/build-qbootctl.sh
+    [ -f build/qcom/pd-mapper ] && [ -f build/qcom/tqftpserv ] || scripts/build-qcom-daemons.sh
     mkdir -p build/ssh
     [ -f build/ssh/pixel5_ed25519 ] || ssh-keygen -q -t ed25519 -N "" -C pixel5-port-automation -f build/ssh/pixel5_ed25519
     # A host without ~/.ssh/*.pub is fine (the project key still goes in);
@@ -68,6 +69,8 @@ else
 fi
 # A/B slot marking (scripts/build-qbootctl.sh, pixel5-boot-successful.service).
 install -m 755 build/qbootctl/qbootctl "$R/usr/local/sbin/qbootctl"
+# Modem helpers built from external/ (scripts/build-qcom-daemons.sh).
+install -m 755 build/qcom/pd-mapper build/qcom/tqftpserv "$R/usr/local/sbin/"
 
 # SSH access.
 install -d -m 700 -o 1000 -g 1000 "$R/home/ubuntu/.ssh"

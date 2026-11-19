@@ -26,3 +26,9 @@
 	branch = lineage-24.0
 	shallow = true
 	ignore = dirty
+[submodule "external/pd-mapper"]
+	path = external/pd-mapper
+	url = https://github.com/linux-msm/pd-mapper
+[submodule "external/tqftpserv"]
+	path = external/tqftpserv
+	url = https://github.com/linux-msm/tqftpserv

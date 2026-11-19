@@ -57,6 +57,13 @@ mkdir -p /tmp/mods.done
 : > /tmp/mods.failed
 tr - _ < $M/modules.softdep > /tmp/mods.softdep 2>/dev/null
 for f in $M/*.ko; do f=${f##*/}; echo "$(echo "${f%.ko}" | tr - _) $f"; done > /tmp/mods.map
+# Module parameters from the kernel cmdline ("service_locator.enable=1",
+# "ufs_qcom.async_probe=1", ...): modprobe applies them, plain insmod does
+# not (Test 19: servloc stayed disabled). androidboot.* is skipped (it holds
+# the serial number).
+tr ' ' '\n' < /proc/cmdline | grep -v '^androidboot\.' \
+    | sed -n 's/^\([A-Za-z0-9_-]*\)\.\([A-Za-z0-9_]*=[^ ]*\)$/\1 \2/p' \
+    | while read -r m a; do echo "$(echo "$m" | tr - _) $a"; done > /tmp/mods.params
 load_one() {   # $1 = module name or file name (recursive: keep vars local)
     local n f p d rev
     n=$(echo "${1%.ko}" | tr - _)
@@ -68,7 +75,7 @@ load_one() {   # $1 = module name or file name (recursive: keep vars local)
     rev=""
     for d in $(sed -n "s|^$M/$f:||p" $M/modules.dep); do rev="${d##*/} $rev"; done
     for d in $rev; do load_one "$d"; done
-    insmod "$M/$f" 2>/dev/null || echo "$f" >> /tmp/mods.failed
+    insmod "$M/$f" $(sed -n "s/^$n //p" /tmp/mods.params) 2>/dev/null || echo "$f" >> /tmp/mods.failed
 }
 
 # ---- early modules: watchdog + restart driver -----------------------------
