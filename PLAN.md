@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: phone needed for P1.1. Offline prep meanwhile: factory-image script, v3 boot image script, 4.19 test build.
+## ▶ RESUME HERE: P1.4 (unlock; owner confirms, wipes the phone).
 
 ---
 
@@ -50,15 +50,15 @@ Background: `docs/research.md` (summary) and `docs/research/*.md` (full agent re
   - Record each branch + commit in `docs/log.md`.
 
 ## Phase 1: Phone prep (1–2 h, needs the phone, ⚠️ wipes it)
-- [ ] **P1.1** Back up anything you want from the phone. Unlocking erases it.
-- [ ] **P1.2** Settings → About phone: Android version, build number, storage, model → `docs/device-info.md`.
-- [ ] **P1.3** Tap *Build number* 7×, turn on **OEM unlocking** + **USB debugging**.
+- [x] **P1.1** _Owner 2026-11-19._ Back up anything you want from the phone. Unlocking erases it.
+- [x] **P1.2** _Done 2026-11-19 via getprop: GTT9Q, MP1.0, final build, slot _b; `docs/device-info.md`._ Settings → About phone: Android version, build number, storage, model → `docs/device-info.md`.
+- [x] **P1.3** _Done 2026-11-19: not greyed out (`sys.oem_unlock_allowed=1`)._ Tap *Build number* 7×, turn on **OEM unlocking** + **USB debugging**.
   - Gate: OEM unlocking is not greyed out (Verizon units can't be unlocked).
 - [ ] **P1.4** `adb reboot bootloader`, `fastboot flashing unlock` (confirm on phone), `fastboot getvar unlocked`.
   - Gate: `unlocked: yes`.
 - [x] **P1.5** _Zip downloaded by the owner 2026-11-19; SHA-256 `4e5a2679…` pinned in get-firmware.sh and matches. Phone build still to check in P1.2._ Download the final factory image (`UP1A.231105.001.B2`, Android 14) from developers.google.com/android/images#redfin into `firmware/`; record its SHA-256 from the page. If the phone is on an older build, run its `flash-all.sh`.
   - Gate: phone boots Android 14 with the matching build number.
-- [ ] **P1.6** **Last chance with Android running**, inventory over `adb shell` (non-root; record what is readable): `ls -lR /vendor/firmware /vendor/firmware_mnt/image /vendor/etc/sensors`, `ls -l /dev/block/by-name`, `getprop | grep -E 'ro.boot|ro.product|ro.hardware'` (drop `serialno`), `zcat /proc/config.gz` if readable → `docs/device-info.md` / `firmware/` (gitignored).
+- [x] **P1.6** _Done 2026-11-19: partition map, dtbo_idx 25, kernel, config → `docs/device-info.md`, raw in `firmware/inventory/`. `/vendor/firmware_mnt` (modem) not readable without root: listed in P2.6 instead._ **Last chance with Android running**, inventory over `adb shell` (non-root; record what is readable): `ls -lR /vendor/firmware /vendor/firmware_mnt/image /vendor/etc/sensors`, `ls -l /dev/block/by-name`, `getprop | grep -E 'ro.boot|ro.product|ro.hardware'` (drop `serialno`), `zcat /proc/config.gz` if readable → `docs/device-info.md` / `firmware/` (gitignored).
   - Why: the mainline report could not confirm firmware file names; this answers it in 5 minutes.
 - [ ] **P1.7** `fastboot getvar all 2>&1 | tee firmware/getvar-all.txt`. Note slot, sizes of boot, vendor_boot, dtbo, super, userdata, modem. Strip the serial before committing anything.
 - [x] **P1.8** _Done 2026-11-19 by `get-firmware.sh`; vendor.img is its own file in the zip (no lpunpack needed)._ From the factory zip extract `boot.img`, `vendor_boot.img`, `dtbo.img`, `vbmeta.img`, `super` (via `lpunpack` → `vendor.img`) into `firmware/`.

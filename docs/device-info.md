@@ -61,4 +61,33 @@ GPU `a620_zap.{mdt,bNN,elf}`, `a650_sqe.fw`, `a650_gmu.bin`; DSPs `adsp.{mdt,bNN
 
 ## From the phone
 
-(P1.2, P1.6, P1.7, P2.5: to fill in.)
+### Android, before unlock (P1.2, P1.6; 2026-11-19, over adb, non-root)
+
+| Property | Value |
+|---|---|
+| Model / device / SKU | Pixel 5 / redfin / GTT9Q (`pcbcfg R3-ROW`), revision MP1.0 |
+| Build | `UP1A.231105.001.B2` (Android 14, patch 2023-11-05): already the final build |
+| Bootloader | `r3-0.6-10489834` |
+| Active slot | `_b` |
+| dtbo_idx | **25** (matches the offline pick of `v2 Redfin PVT`) |
+| RAM / UFS | 8 GB Micron LPDDR4X / 128 GB Micron |
+| Kernel | `4.19.278-g7b0944645172-ab10812814`, Android clang 12.0.5 (r416183b) |
+| OEM unlock | allowed; bootloader locked, verifiedbootstate green |
+
+Partitions (`/dev/block/by-name`; LUN sda = data, sdb/sdc = xbl, sdd = cdt/ddr, **sde = bootloader chain, never write**, sdf = modem NV):
+
+| Partition | Device | Partition | Device |
+|---|---|---|---|
+| ssd | sda1 | persist | sda2 |
+| misc | sda3 | keystore | sda4 |
+| frp | sda5 | boot_a / boot_b | sda6 / sda7 |
+| vendor_boot_a / _b | sda8 / sda9 | dtbo_a / _b | sda10 / sda11 |
+| modem_a / _b | sda12 / sda13 | klog | sda14 |
+| metadata | sda15 | vbmeta_system_a / _b | sda16 / sda17 |
+| super | sda18 | userdata | sda19 |
+| vbmeta_a / _b | sde10 / sde26 | modemst1 / modemst2 | sdf2 / sdf3 |
+| fsg / fsc | sdf4 / sdf5 | devinfo | sde33 |
+
+Android mounts `modem_b` (vfat) at `/vendor/firmware_mnt` and vendor via dm (`dm-10`); `persist` (ext4) at `/mnt/vendor/persist`. Non-root can't list `/vendor/firmware_mnt`. Raw dumps: `firmware/inventory/` (gitignored).
+
+(P1.7, P2.5: to fill in.)
