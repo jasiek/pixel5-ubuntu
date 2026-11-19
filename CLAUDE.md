@@ -24,6 +24,9 @@ project at `../ubuntu-touch-pixel2`; same methods, rules and lessons.
   GPL-2.0-only for kernel patches/DTs, upstream terms for borrowed code).
 - Third-party software goes in a pinned submodule under `external/`. Never an
   ad-hoc clone or a `git clone` in a Dockerfile. Check its license first.
+- Exception (owner, 2026-11-19): single third-party patch files (e.g. a lore
+  series via `b4 am`) may be committed unmodified, each with its origin
+  recorded: list URL / Message-ID or source repo + commit, and its license.
 
 ## Never commit or print
 
