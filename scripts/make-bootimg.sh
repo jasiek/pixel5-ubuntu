@@ -4,7 +4,7 @@
 # field (header version, os_version, os_patch_level, cmdline) copied from the
 # factory boot.img, so nothing walleye-style is hardcoded.
 #
-#   scripts/make-bootimg.sh <kernel Image.lz4|stock> <ramdisk.cpio.gz> <out.img> [extra cmdline]
+#   scripts/make-bootimg.sh <kernel Image.lz4|stock> <ramdisk.cpio.lz4> <out.img> [extra cmdline]
 #     kernel "stock" = the factory boot.img's own kernel (Phase 2).
 #   AVB_FOOTER=1 adds an AVB hash footer (P1.10 decides whether it is needed).
 #

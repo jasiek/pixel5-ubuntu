@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Build the initramfs: static busybox + initramfs/init -> build/initramfs.cpio.gz
-#   scripts/build-initramfs.sh [init-script] [output]   (e.g. initramfs/probe-init build/initramfs-probe.cpio.gz)
+# Build the initramfs: static busybox + initramfs/init -> build/initramfs.cpio.lz4
+#   scripts/build-initramfs.sh [init-script] [output]   (e.g. initramfs/probe-init build/initramfs-probe.cpio.lz4)
+#
+# LZ4 *legacy* format (lz4 -l), like the stock boot ramdisk. The bootloader
+# puts the vendor ramdisk (LZ4 legacy) in front of ours, and the kernel's
+# legacy LZ4 decoder only accepts more LZ4 legacy after it: a gzip archive
+# there fails with "Decoding failed" and is silently dropped, so the vendor's
+# recovery /init runs instead of ours (Test 1, Test 2).
 set -euo pipefail
 
 if [ ! -f /.dockerenv ]; then
@@ -19,7 +25,7 @@ mknod -m 600 "$T/dev/console" c 5 1
 mknod -m 666 "$T/dev/null" c 1 3
 
 mkdir -p /work/build
-OUTF="/work/${2:-build/initramfs.cpio.gz}"
-(cd "$T" && find . | sort | cpio -o -H newc --quiet | gzip -9) > "$OUTF"
+OUTF="/work/${2:-build/initramfs.cpio.lz4}"
+(cd "$T" && find . | sort | cpio -o -H newc --quiet | lz4 -l -9 -c) > "$OUTF"
 rm -rf "$T"
 ls -la "$OUTF"
