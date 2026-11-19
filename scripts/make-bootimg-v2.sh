@@ -8,12 +8,13 @@
 # unlocked bootloader refuses boot images without one).
 #
 #   scripts/make-bootimg-v2.sh <kernel> <ramdisk.cpio.lz4> <dtb> <out.img> [extra cmdline]
+#   VENDOR_CMDLINE=0: leave out the stock vendor cmdline (mainline kernels).
 set -euo pipefail
 
 if [ ! -f /.dockerenv ]; then
     exec "$(dirname "$0")/dev.sh" /work/scripts/make-bootimg-v2.sh "$@"
 fi
-[ $# -ge 4 ] || { sed -n '3,11p' "$0"; exit 2; }
+[ $# -ge 4 ] || { sed -n '3,12p' "$0"; exit 2; }
 KERNEL=/work/$1 RAMDISK=/work/$2 DTB=/work/$3 OUT=/work/$4 EXTRA=${5:-}
 MKB=/work/external/mkbootimg
 T=/work/build/v2-unpack
@@ -22,7 +23,8 @@ info() { python3 "$MKB/unpack_bootimg.py" --boot_img "$1" --out "$2"; }
 osv=$(info /work/firmware/boot.img "$T/boot" | sed -n 's/^os version: //p')
 ospl=$(info /work/firmware/boot.img "$T/boot" | sed -n 's/^os patch level: //p')
 vcmd=$(info /work/firmware/vendor_boot.img "$T/vboot" | sed -n 's/^vendor command line args: //p')
-cmd="$vcmd${EXTRA:+ $EXTRA}"
+[ "${VENDOR_CMDLINE:-1}" = 1 ] || vcmd=""
+cmd="$vcmd${vcmd:+${EXTRA:+ }}$EXTRA"
 [ ${#cmd} -le 1536 ] || { echo "cmdline ${#cmd} > 1536 bytes (v2 limit)" >&2; exit 1; }
 echo "v2: os $osv / $ospl, cmdline ${#cmd} bytes (vendor ${#vcmd})" >&2
 python3 "$MKB/mkbootimg.py" --header_version 2 --pagesize 4096 --base 0 \
