@@ -68,8 +68,8 @@ Background: `docs/research.md` (summary) and `docs/research/*.md` (full agent re
 
 ## Phase 2: Debug shell on the stock kernel (2–4 h, nothing flashed)
 Why first: the stock kernel matches the stock vendor_boot modules, so UFS and USB load with zero kernel work. We get a Linux shell before building anything, and use it for backups.
-- [ ] **P2.1** `scripts/build-initramfs.sh` (adapted): busybox `/init` that `insmod`s from the vendor ramdisk's `/lib/modules` in `modules.load` order, starts a configfs NCM/ECM gadget at `172.16.42.1`, runs `telnetd`, never mounts userdata read-write, and returns to fastboot after 10 min.
-- [ ] **P2.2** `scripts/make-bootimg.sh` for header v3: stock kernel from `firmware/boot.img` + our ramdisk (+ AVB footer if P1.10 needed it).
+- [ ] **P2.1** _Prepared 2026-11-19 (untested on the phone): modules.load in two passes, 15 s UDC wait, userdata mounted only with ext4 label `ubuntu`._ `scripts/build-initramfs.sh` (adapted): busybox `/init` that `insmod`s from the vendor ramdisk's `/lib/modules` in `modules.load` order, starts a configfs NCM/ECM gadget at `172.16.42.1`, runs `telnetd`, never mounts userdata read-write, and returns to fastboot after 10 min.
+- [ ] **P2.2** _Prepared 2026-11-19: all fields from the factory boot.img via `unpack_bootimg --format=mkbootimg`; tested on a synthetic v3 image._ `scripts/make-bootimg.sh` for header v3: stock kernel from `firmware/boot.img` + our ramdisk (+ AVB footer if P1.10 needed it).
 - [ ] **P2.3** `scripts/try-boot.sh build/boot-stock-debug.img`.
   - Gate: telnet or USB-serial shell. If the vendor ramdisk's `/init` wins over ours (reported by AginxOS, unverified): log it, try `rdinit=`, then a renamed init.
 - [ ] **P2.4** ⚠️ **Backups before anything else touches the phone:** `dd` `persist`, `modemst1`, `modemst2`, `fsg`, `fsc` (IMEI + calibration) to `firmware/backup/` on the Mac.
@@ -82,7 +82,7 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
 - [ ] **P3.1** Can Ubuntu run on the **stock** kernel? Check its config (P1.6/P2) for systemd needs: `DEVTMPFS`, `FHANDLE`, `CGROUPS`, `AUTOFS_FS`, namespaces, `SECCOMP`, `TMPFS_XATTR`. All present → skip P3.2 for milestone 1 and log it.
 - [ ] **P3.2** `scripts/build-kernel.sh`: LineageOS 4.19 `redbull_defconfig` + `kernel/redfin-ubuntu.config` (systemd options above; static usermode helper off; firmware user-helper fallback off; USB `CONFIGFS_NCM`). Build first-stage drivers in (`=y`) where possible; ship the rest in our initramfs, since vendor ramdisk modules won't match our vermagic.
   - Gate: compiles; `fastboot boot` reaches the P2 debug shell with our modules.
-- [ ] **P3.3** `scripts/build-rootfs.sh` (adapted): ubuntu-base 24.04, hostname `pixel5`, user `ubuntu` + SSH keys, NetworkManager, avahi, USB gadget unit, kernel modules → ext4 `build/rootfs.img` → `img2simg`.
+- [ ] **P3.3** `scripts/build-rootfs.sh` (adapted): ext4 label **`ubuntu`** (the initramfs refuses anything else), ubuntu-base 24.04, hostname `pixel5`, user `ubuntu` + SSH keys, NetworkManager, avahi, USB gadget unit, kernel modules → ext4 `build/rootfs.img` → `img2simg`.
 - [ ] **P3.4** initramfs: find userdata by partlabel, `resize2fs` once, `switch_root`; debug shell on failure.
 - [ ] **P3.5** ⚠️ (owner OK) `fastboot flash userdata build/rootfs.simg`, then `scripts/try-boot.sh build/boot.img`.
   - Gate: `ssh ubuntu@172.16.42.1` works. 🎉 **Milestone 1: Ubuntu 24.04 runs on the Pixel 5.**
