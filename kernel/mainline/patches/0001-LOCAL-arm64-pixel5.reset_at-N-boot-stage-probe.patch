@@ -1,43 +1,53 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: pixel5 <pixel5@localhost>
 Date: Thu, 19 Nov 2026 15:18:15 +0000
-Subject: [PATCH] LOCAL: arm64: pixel5.reset_at=N boot-stage reset probe
+Subject: [PATCH] LOCAL: arm64: pixel5.reset_at=N boot-stage probe
 
 Bring-up aid for the Pixel 5, which has no UART and keeps no pstore over
-a reset: reset via PSCI SYSTEM_RESET when the boot reaches stage N, so the
-next boot reason shows how far the kernel got. Not for upstream.
+a reset: when the boot reaches stage N, reboot into the bootloader the way
+the downstream kernel does (IMEM restart_reason cookie 0x77665500, then
+PSCI SYSTEM_RESET). Landing in fastboot means stage N was reached.
+Not for upstream.
 
 Signed-off-by: pixel5 <pixel5@localhost>
 ---
- arch/arm64/kernel/setup.c | 29 +++++++++++++++++++++++++++++
- init/main.c               |  7 +++++++
- 2 files changed, 36 insertions(+)
+ arch/arm64/kernel/setup.c | 45 +++++++++++++++++++++++++++++++++++++++
+ init/main.c               | 12 ++++++++++-
+ 2 files changed, 56 insertions(+), 1 deletion(-)
 
 diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
-index a707deba6..38dbd1ab6 100644
+index a707deba6..17a5fe3cb 100644
 --- a/arch/arm64/kernel/setup.c
 +++ b/arch/arm64/kernel/setup.c
-@@ -54,6 +54,8 @@
+@@ -54,6 +54,10 @@
  #include <asm/efi.h>
  #include <asm/xen/hypervisor.h>
  #include <asm/mmu_context.h>
 +#include <linux/arm-smccc.h>
++#include <linux/io.h>
++#include <asm/early_ioremap.h>
 +#include <uapi/linux/psci.h>
  
  static int num_standard_resources;
  static struct resource *standard_resources;
-@@ -278,6 +280,31 @@ u64 cpu_logical_map(unsigned int cpu)
+@@ -278,6 +282,45 @@ u64 cpu_logical_map(unsigned int cpu)
  	return __cpu_logical_map[cpu];
  }
  
 +/*
 + * Bring-up probe for boards without a UART or pstore (Pixel 5):
-+ * pixel5.reset_at=N resets the board via PSCI SYSTEM_RESET when the boot
-+ * reaches stage N. Reaching a stage shows up as a boot reason other than
-+ * the watchdog's. 1: early params parsed, 2: end of setup_arch,
-+ * 3: mm_core_init done, 4: rest_init, 5: before initcalls,
-+ * 6: initcalls done, 7: about to run the initramfs init.
++ * pixel5.reset_at=N reboots into the bootloader (fastboot) when the boot
++ * reaches stage N, the way the downstream kernel does for "reboot
++ * bootloader": cookie 0x77665500 in the IMEM restart_reason word
++ * (live DT: imem@146ab000 + 0x65c), then PSCI SYSTEM_RESET.
++ * 1: early params parsed, 2: end of setup_arch, 3: mm_core_init done,
++ * 4: rest_init, 5: before initcalls, 6: initcalls done,
++ * 7: about to run the initramfs init. 1000+K: before initcall K of
++ * do_basic_setup() (K counts from __initcall0_start, see System.map).
 + */
++#define PIXEL5_RESTART_REASON	0x146ab65c
++#define PIXEL5_BOOTLOADER	0x77665500
++
 +static int pixel5_reset_at;
 +
 +static int __init pixel5_reset_at_setup(char *s)
@@ -49,16 +59,24 @@ index a707deba6..38dbd1ab6 100644
 +void pixel5_stage(int n)
 +{
 +	struct arm_smccc_res res;
++	void __iomem *r;
 +
 +	if (pixel5_reset_at != n)
 +		return;
++	/* stages 1-2 run before the vmalloc area exists */
++	r = n <= 2 ? early_ioremap(PIXEL5_RESTART_REASON, 4)
++		   : ioremap(PIXEL5_RESTART_REASON, 4);
++	if (r) {
++		writel_relaxed(PIXEL5_BOOTLOADER, r);
++		dsb(sy);
++	}
 +	arm_smccc_smc(PSCI_0_2_FN_SYSTEM_RESET, 0, 0, 0, 0, 0, 0, 0, &res);
 +}
 +
  void __init __no_sanitize_address setup_arch(char **cmdline_p)
  {
  	setup_initial_init_mm(_text, _etext, _edata, _end);
-@@ -297,6 +324,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+@@ -297,6 +340,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
  	 */
  	jump_label_init();
  	parse_early_param();
@@ -66,7 +84,7 @@ index a707deba6..38dbd1ab6 100644
  
  	dynamic_scs_init();
  
-@@ -373,6 +401,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+@@ -373,6 +417,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
  			"This indicates a broken bootloader or old kernel\n",
  			boot_args[1], boot_args[2], boot_args[3]);
  	}
@@ -75,7 +93,7 @@ index a707deba6..38dbd1ab6 100644
  
  static inline bool cpu_can_disable(unsigned int cpu)
 diff --git a/init/main.c b/init/main.c
-index d7bf1ffc5..c11c414d7 100644
+index d7bf1ffc5..66a73f74c 100644
 --- a/init/main.c
 +++ b/init/main.c
 @@ -34,6 +34,8 @@
@@ -103,7 +121,20 @@ index d7bf1ffc5..c11c414d7 100644
  	rest_init();
  
  	/*
-@@ -1645,6 +1649,7 @@ static int __ref kernel_init(void *unused)
+@@ -1477,8 +1481,11 @@ static void __init do_initcall_level(int level, char *command_line)
+ 		   NULL, ignore_unknown_bootoption);
+ 
+ 	do_trace_initcall_level(initcall_level_names[level]);
+-	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++)
++	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++) {
++		/* pixel5.reset_at=1000+K: stop before initcall K (from 0) */
++		pixel5_stage(1000 + (int)(fn - initcall_levels[0]));
+ 		do_one_initcall(initcall_from_entry(fn));
++	}
+ }
+ 
+ static void __init do_initcalls(void)
+@@ -1645,6 +1652,7 @@ static int __ref kernel_init(void *unused)
  	do_sysctl_args();
  
  	if (ramdisk_execute_command) {
@@ -111,7 +142,7 @@ index d7bf1ffc5..c11c414d7 100644
  		ret = run_init_process(ramdisk_execute_command);
  		if (!ret)
  			return 0;
-@@ -1729,7 +1734,9 @@ static noinline void __init kernel_init_freeable(void)
+@@ -1729,7 +1737,9 @@ static noinline void __init kernel_init_freeable(void)
  	padata_init();
  	page_alloc_init_late();
  
