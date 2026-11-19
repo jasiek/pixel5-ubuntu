@@ -695,6 +695,22 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
+		/*
+		 * Panel vdd, 3.0 V (pm8150_l16).
+		 * Panel rail (live DT: only the DSI display uses it). No display
+		 * driver yet: regulator-boot-on without a consumer makes the core
+		 * switch it off in its unused-regulator cleanup (~30 s after
+		 * boot), as downstream's proxy vote release does. Otherwise the
+		 * bootloader's vote keeps the command-mode OLED showing the splash
+		 * (burn-in; docs/log.md after Test 95).
+		 */
+		vreg_l16a_3p0: ldo16 {
+			regulator-name = "vreg_l16a_3p0";
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3000000>;
+			regulator-boot-on;
+		};
+
 		vreg_l12a_1p8: ldo12 {
 			regulator-name = "vreg_l12a_1p8";
 			regulator-min-microvolt = <1800000>;
@@ -706,6 +722,22 @@
 	regulators-1 {
 		compatible = "qcom,pm8150l-rpmh-regulators";
 		qcom,pmic-id = "c";
+
+		/*
+		 * Panel vddio, 1.8 V (pm8150a_l1).
+		 * Panel rail (live DT: only the DSI display uses it). No display
+		 * driver yet: regulator-boot-on without a consumer makes the core
+		 * switch it off in its unused-regulator cleanup (~30 s after
+		 * boot), as downstream's proxy vote release does. Otherwise the
+		 * bootloader's vote keeps the command-mode OLED showing the splash
+		 * (burn-in; docs/log.md after Test 95).
+		 */
+		vreg_l1c_1p8: ldo1 {
+			regulator-name = "vreg_l1c_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-boot-on;
+		};
 
 		/* WLAN RFA (icnss vdd-1.3-rfa: pm8150a_l2, 1.144-1.328 V) */
 		vreg_l2c_1p3: ldo2 {
