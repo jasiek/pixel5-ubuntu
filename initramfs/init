@@ -39,6 +39,12 @@ log "started, kernel $(uname -r)"
 #    2 = modules loaded, 3 = USB gadget bound.
 #  - initdebug: the fastboot-return timer starts here, before anything that
 #    can hang (Test 1: an image that hung before the old timer never came back).
+# Firmware: the stock kernel has FW_LOADER_USER_HELPER_FALLBACK=y, so every
+# firmware file missing on disk waits 60 s for a userspace helper (Android's
+# ueventd) that we don't run, blocking insmod (Test 7). Fail fast instead.
+echo 1 > /proc/sys/kernel/firmware_config/ignore_sysfs_fallback 2>/dev/null
+echo 1 > /sys/class/firmware/timeout 2>/dev/null
+
 # ---- early modules: watchdog + restart driver -----------------------------
 # The bootloader leaves the Qualcomm hardware watchdog running; Android loads
 # watchdog_v2.ko within 0.5 s to feed it. Without it the phone cold-resets
@@ -80,10 +86,13 @@ stage 0
 # modules.load gives the order; a second pass catches order slips.
 load_modules() {
     [ -f /lib/modules/modules.load ] || { log "no /lib/modules/modules.load"; return 0; }
+    # initmods=N (bisecting a stall): load only the first N modules.
+    n=$(sed -n 's/.*initmods=\([0-9]*\).*/\1/p' /proc/cmdline)
+    head -n "${n:-100000}" /lib/modules/modules.load > /tmp/mods.list
     : > /tmp/mods.retry
     while read -r m; do
         insmod "/lib/modules/${m##*/}" 2>/dev/null || echo "$m" >> /tmp/mods.retry
-    done < /lib/modules/modules.load
+    done < /tmp/mods.list
     : > /tmp/mods.failed
     while read -r m; do
         insmod "/lib/modules/${m##*/}" 2>/dev/null || echo "$m" >> /tmp/mods.failed
