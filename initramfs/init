@@ -33,6 +33,24 @@ mount -t tmpfs    tmpfs    /tmp
 log() { echo "initramfs: $*" > /dev/kmsg; echo "initramfs: $*" >> /tmp/init.log; }
 log "started, kernel $(uname -r)"
 
+# Bring-up probes (no UART on redfin; a hang shows nothing):
+#  - initstage=N: reboot to fastboot right after stage N, so "phone came back
+#    to fastboot" proves we got that far. 0 = init runs (/dev ready),
+#    2 = modules loaded, 3 = USB gadget bound.
+#  - initdebug: the fastboot-return timer starts here, before anything that
+#    can hang (Test 1: an image that hung before the old timer never came back).
+stage() {
+    if grep -qw "initstage=$1" /proc/cmdline; then
+        log "stage $1 reached, rebooting to bootloader"
+        sync; reboot-bootloader; sleep 30
+    fi
+}
+if grep -qw initdebug /proc/cmdline; then
+    t=$(sed -n 's/.*initdebug_timeout=\([0-9]*\).*/\1/p' /proc/cmdline)
+    ( sleep "${t:-600}"; [ -e /tmp/keep ] || { log "debug timeout, rebooting to bootloader"; reboot-bootloader; } ) &
+fi
+stage 0
+
 # ---- kernel modules -------------------------------------------------------
 # On redfin UFS, USB, clocks and pinctrl are modules. With the stock kernel
 # they come from the flashed vendor_boot's ramdisk (/lib/modules, merged
@@ -52,6 +70,7 @@ load_modules() {
     log "modules: $(wc -l < /lib/modules/modules.load) listed, $(wc -l < /tmp/mods.failed) failed (/tmp/mods.failed)"
 }
 load_modules
+stage 2
 
 # ---- USB gadget: NCM network + ACM serial ---------------------------------
 G=/sys/kernel/config/usb_gadget/g1
@@ -84,6 +103,7 @@ setup_usb() {
     fi
 }
 setup_usb
+stage 3
 
 # Serial root shell on the USB ACM port, available in every mode
 # (until switch_root replaces this process tree).
@@ -113,10 +133,9 @@ EOF
     log "telnet 172.16.42.1 (debug shell); log: /tmp/init.log; pstore: /sys/fs/pstore"
     mkdir -p /sys/fs/pstore
     mount -t pstore pstore /sys/fs/pstore 2>/dev/null
-    # Unattended safety net: go back to fastboot after 10 min unless someone
-    # ran `touch /tmp/keep` (initdebug_timeout=<s> on the cmdline overrides).
-    t=$(sed -n 's/.*initdebug_timeout=\([0-9]*\).*/\1/p' /proc/cmdline)
-    ( sleep "${t:-600}"; [ -e /tmp/keep ] || { log "debug timeout, rebooting to bootloader"; reboot-bootloader; } ) &
+    # Fastboot-return timer: started at the top (initdebug). Without
+    # initdebug (a failed normal boot) start one here.
+    grep -qw initdebug /proc/cmdline || ( sleep 600; [ -e /tmp/keep ] || reboot-bootloader ) &
     while true; do sleep 3600; done
 }
 
