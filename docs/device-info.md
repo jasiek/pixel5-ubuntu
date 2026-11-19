@@ -90,4 +90,27 @@ Partitions (`/dev/block/by-name`; LUN sda = data, sdb/sdc = xbl, sdd = cdt/ddr, 
 
 Android mounts `modem_b` (vfat) at `/vendor/firmware_mnt` and vendor via dm (`dm-10`); `persist` (ext4) at `/mnt/vendor/persist`. Non-root can't list `/vendor/firmware_mnt`. Raw dumps: `firmware/inventory/` (gitignored).
 
-(P1.7, P2.5: to fill in.)
+### Debug shell on the stock kernel (P2.5, 2026-11-19)
+
+Live DT (`/sys/firmware/fdt` → `firmware/live.dtb`, 669 KB, gitignored; `firmware/live.dts` decompiled, 29835 lines): model `Google Inc. MSM sm7250 v2 Redfin PVT`, `compatible = "google,redfin-sm7250", "qcom,sm7250"`, `qcom,msm-id = <0x190 0x20000 0x1b8 0x20000>`, `qcom,board-id = <0xb1e05 0>`. This is the base DTB after the bootloader applied dtbo entry 25, as predicted offline.
+
+Kernel cmdline: the bootloader adds these to the vendor cmdline (values safe to record; the serial and `vbmeta.digest`/`cid` values are not recorded):
+
+| Key | Value |
+|---|---|
+| `msm_drm.dsi_display0` | `qcom,mdss_dsi_s6e3hc2_dvt_dsc_1080p_cmd:` (panel: Samsung S6E3HC2, DSC, command mode) |
+| `androidboot.hardware.platform` / `hardware` | `sm7250` / `redfin` |
+| `androidboot.dtbo_idx` / `dtb_idx` | 25 / 0 |
+| `androidboot.slot_suffix`, `slot_successful`, `slot_retry_count` | `_b`, yes, 0 |
+| `androidboot.verifiedbootstate`, `vbmeta.device_state`, `veritymode` | orange, unlocked, enforcing |
+| `androidboot.secure_boot`, `ramdump` | PRODUCTION, disabled |
+| `androidboot.bootreason` | `reboot,bootloader` (after our probe reboots) |
+| `androidboot.hardware.ddr`, `ufs` | `8GB,Micron,LPDDR4X`, `128GB,Micron` |
+| `androidboot.hardware.devcfg`, `majorid`, `radio.subtype`, `dsds` | `G950-03453-01`, `0x0B`, 2, 0 |
+| others | `init=/init`, `rootwait`, `ro`, `rcu_nocbs`, `rcupdate.rcu_expedited`, `usbcfg.suzyq=disabled`, `androidboot.force_normal_boot=1` |
+
+UFS LUNs: `sda` 121920 MiB (19 partitions, data), `sdb`/`sdc` 8 MiB (2 each, xbl), `sdd` 8 MiB (3, cdt/ddr), `sde` 64 MiB (42, bootloader chain), `sdf` 16 MiB (5, modem NV). Partition numbers as in the table above. RAM visible to Linux: 7462 MiB.
+
+Subsystems (`/sys/bus/msm_subsys`, after loading all 218 first-stage modules, no firmware): `modem`, `adsp`, `cdsp`, `npu`, `venus`, `a620_zap`, `ipa_fws`, all `OFFLINING` (registered, not booted).
+
+Init facts (Tests 1–11, `docs/log.md`): our ramdisk must be **LZ4 legacy**; `watchdog_v2` must load within ~100 s; module loading must honour `modules.softdep` (`qmi_helpers pre: qrtr`); `reboot bootloader` only lands in fastboot once the full module set (restart reason via `msm-poweroff`) is up.
