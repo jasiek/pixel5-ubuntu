@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+# Battery SOC for the QGauge (replaces Android's hvdcp_opti) and the 70-80 %
+# charge limit, which needs a live SOC: ExecStopPost (also run after a
+# crash) turns the limit off, so a stale SOC can never keep the input cut.
+[Unit]
+Description=Battery state of charge (QGauge client) and charge limit
+After=local-fs.target
+
+[Service]
+ExecStart=/usr/local/sbin/pixel5-qgauge
+ExecStartPost=/usr/local/sbin/pixel5-charge-limit 80 70
+ExecStopPost=/usr/local/sbin/pixel5-charge-limit off
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

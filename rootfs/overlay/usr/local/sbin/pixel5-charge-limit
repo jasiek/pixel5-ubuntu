@@ -1,0 +1,18 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Charge limit via google_charger's retail/"dwell-defend" levels.
+#   pixel5-charge-limit <stop> <start>    e.g. 80 70
+#   pixel5-charge-limit off               back to the defaults (100 / 0)
+# Above <stop> the charger also cuts the input, so the phone runs down to
+# <stop> on battery; at or below <start> it charges again. This acts on SOC,
+# so it must only be on while pixel5-qgauge keeps SOC current (the unit
+# turns it off in ExecStopPost). The kernel ignores invalid writes, so
+# order matters: stop before start when setting, start before stop when
+# clearing.
+set -eu
+d=$(dirname "$(ls /sys/devices/platform/soc/*google,charger/charge_stop_level)")
+case "${1:-}" in
+off) echo 0 > "$d/charge_start_level"; echo 100 > "$d/charge_stop_level" ;;
+*)   echo "$1" > "$d/charge_stop_level"; echo "$2" > "$d/charge_start_level" ;;
+esac
+echo "charge limit: stop $(cat "$d/charge_stop_level") start $(cat "$d/charge_start_level")"

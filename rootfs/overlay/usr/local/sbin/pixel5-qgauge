@@ -1,0 +1,174 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: MIT
+"""Battery state of charge for the PM7250B QGauge (qpnp-qg), without Android.
+
+    pixel5-qgauge            run: read FIFO data, write SOC back to the kernel
+    pixel5-qgauge --dump N   print N kernel FIFO reports, write nothing
+
+The downstream qpnp-qg driver measures; it does not decide the SOC. It queues
+voltage/current FIFO samples on /dev/qg (struct qg_kernel_data,
+include/uapi/linux/qg.h) and waits for userspace to write back
+struct qg_user_data (SOC, OCV, ...). On Android that is the closed
+/vendor/bin/hvdcp_opti; without a client the SOC never moves.
+
+The model here is deliberately simple:
+  - coulomb counting with the learned capacity (bms/charge_full),
+  - pulled toward the battery's own OCV->SOC curve (/dev/qg_battery,
+    BPIOCXSOC, the profile the kernel loaded) with OCV ~ V - I*R; the pull is
+    strong when the current is small and weak under load,
+  - a kernel "good OCV" (measured at rest) resets to the curve,
+  - charger reports Full -> 100 %.
+"""
+import fcntl
+import os
+import struct
+import sys
+import time
+
+QG_DEV, BP_DEV = "/dev/qg", "/dev/qg_battery"
+BMS = "/sys/class/power_supply/bms"
+BATTERY = "/sys/class/power_supply/battery"
+STATE = "/var/lib/pixel5/qgauge-soc"
+
+# include/uapi/linux/qg.h
+(QG_SOC, QG_OCV_UV, QG_RBAT_MOHM, QG_PON_OCV_UV, QG_GOOD_OCV_UV, QG_ESR,
+ QG_CHARGE_COUNTER, QG_FIFO_TIME_DELTA, QG_BATT_SOC, QG_CC_SOC,
+ QG_ESR_CHARGE_DELTA, QG_ESR_DISCHARGE_DELTA, QG_ESR_CHARGE_SF,
+ QG_ESR_DISCHARGE_SF, QG_FULL_SOC, QG_CLEAR_LEARNT_DATA, QG_SYS_SOC,
+ QG_V_IBAT, QG_MAX) = range(19)
+MAX_FIFO_LENGTH = 16
+PARAM = struct.Struct("<I?3x")                  # struct qg_param
+FIFO = struct.Struct("<IiII")                   # v (uV), i (uA, signed), count, interval
+KDATA_SIZE = 12 + MAX_FIFO_LENGTH * FIFO.size + QG_MAX * PARAM.size   # 412
+UDATA_SIZE = QG_MAX * PARAM.size                                      # 144
+
+# include/uapi/linux/qg-profile.h: struct battery_params, 7 ints
+BP = struct.Struct("<7i")
+BPIOCXSOC = (3 << 30) | (BP.size << 16) | (ord("B") << 8) | 0x01
+TABLE_SOC_OCV1, TABLE_SOC_OCV2 = 0, 1           # charging, discharging
+
+REST_UA = 50_000         # below this the battery is "at rest": trust the curve
+DEFAULT_RBAT_MOHM = 150
+
+
+def sysfs(path, default=None):
+    try:
+        return int(open(path).read().strip())
+    except (OSError, ValueError):
+        return default
+
+
+def parse_kdata(buf):
+    seq, fifo_time, n = struct.unpack_from("<III", buf, 0)
+    fifo = [FIFO.unpack_from(buf, 12 + k * FIFO.size) for k in range(min(n, MAX_FIFO_LENGTH))]
+    off = 12 + MAX_FIFO_LENGTH * FIFO.size
+    params = {}
+    for k in range(QG_MAX):
+        data, valid = PARAM.unpack_from(buf, off + k * PARAM.size)
+        if valid:
+            params[k] = data
+    return seq, fifo_time, fifo, params
+
+
+def lookup_soc(bp_fd, ocv_uv, temp, charging):
+    """SOC (0..10000) for an OCV on the battery profile's curve."""
+    table = TABLE_SOC_OCV1 if charging else TABLE_SOC_OCV2
+    buf = bytearray(BP.pack(0, int(ocv_uv), 0, 0, 0, temp, table))
+    fcntl.ioctl(bp_fd, BPIOCXSOC, buf)
+    return BP.unpack(buf)[0]
+
+
+def udata(values):
+    out = bytearray(UDATA_SIZE)
+    for k, v in values.items():
+        PARAM.pack_into(out, k * PARAM.size, max(0, int(round(v))), True)
+    return bytes(out)
+
+
+def load_state():
+    try:
+        soc, = struct.unpack("<f", open(STATE, "rb").read(4))
+        return min(10000.0, max(0.0, soc))
+    except (OSError, struct.error):
+        return None
+
+
+def save_state(soc):
+    tmp = STATE + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(struct.pack("<f", soc))
+    os.replace(tmp, STATE)
+
+
+def dump(count):
+    fd = os.open(QG_DEV, os.O_RDONLY)
+    for _ in range(count):
+        buf = os.read(fd, KDATA_SIZE)
+        seq, t, fifo, params = parse_kdata(buf)
+        print(f"seq {seq} rtc {t} len {len(fifo)} params {params}  "
+              f"(bms: V {sysfs(BMS + '/voltage_now')} I {sysfs(BMS + '/current_now')})")
+        for v, i, cnt, iv in fifo:
+            print(f"   v {v} uV  i {i} uA  count {cnt}  interval {iv}")
+        sys.stdout.flush()
+
+
+def run():
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    qg = os.open(QG_DEV, os.O_RDWR)
+    bp = os.open(BP_DEV, os.O_RDWR)
+    soc = load_state()
+    last = time.monotonic()
+    print(f"start: saved SOC {soc if soc is None else round(soc / 100, 1)} %, "
+          f"kernel {sysfs(BMS + '/capacity')} %", flush=True)
+    while True:
+        buf = os.read(qg, KDATA_SIZE)          # blocks until the kernel has data
+        now = time.monotonic()
+        seq, _t, fifo, params = parse_kdata(buf)
+        if not fifo:
+            continue
+        dt = params.get(QG_FIFO_TIME_DELTA, (now - last) * 1000) / 1000.0
+        last = now
+        v = sum(f[0] for f in fifo) / len(fifo)
+        i = sum(f[1] for f in fifo) / len(fifo)           # > 0: discharging
+        temp = sysfs(BMS + "/temp", 250)
+        fcc_uah = sysfs(BMS + "/charge_full") or sysfs(BMS + "/charge_full_design", 4_000_000)
+        rbat = sysfs(BMS + "/esr_actual", 0) // 1000 or DEFAULT_RBAT_MOHM   # uOhm -> mOhm
+        ocv = v + i * rbat / 1000.0                       # uV: V + I*R (I > 0 discharging)
+        charging = i < 0
+        soc_v = lookup_soc(bp, ocv, temp, charging)
+
+        if QG_GOOD_OCV_UV in params:
+            soc = lookup_soc(bp, params[QG_GOOD_OCV_UV], temp, False)
+            why = "good OCV"
+        elif soc is None:
+            soc = float(soc_v)
+            why = "first estimate"
+        else:
+            soc -= i * dt / 3600.0 / fcc_uah * 10000.0    # coulombs
+            weight = 0.3 if abs(i) < REST_UA else 0.02
+            soc += weight * (soc_v - soc)
+            why = "cc+ocv"
+        status = open(BATTERY + "/status").read().strip() if os.path.exists(BATTERY + "/status") else ""
+        if status == "Full":
+            soc, why = 10000.0, "charger full"
+        soc = min(10000.0, max(0.0, soc))
+
+        os.write(qg, udata({
+            QG_SYS_SOC: soc,
+            QG_SOC: round(soc / 100),
+            QG_BATT_SOC: soc,
+            QG_OCV_UV: ocv,
+            QG_RBAT_MOHM: rbat,
+            QG_CHARGE_COUNTER: soc / 10000.0 * fcc_uah,
+        }))
+        save_state(soc)
+        print(f"seq {seq}: V {v / 1e6:.3f} I {i / 1000:+.0f} mA dt {dt:.0f} s "
+              f"OCV {ocv / 1e6:.3f} curve {soc_v / 100:.1f} % -> {soc / 100:.1f} % ({why})",
+              flush=True)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--dump":
+        dump(int(sys.argv[2]))
+    else:
+        run()

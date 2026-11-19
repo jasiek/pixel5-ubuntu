@@ -102,7 +102,7 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
   - Gate: after 3 boots `fastboot getvar slot-successful:<slot>` is `yes`.
 - [ ] **P5.4** _2026-11-19: 5 warm reboots → SSH over wifi in 45–48 s each (Test 23). Left: cold boot (owner presses power)._ Power off, press power. Then 5 reboots.
   - Gate: SSH over wifi within 60 s every time. 🎉 **Milestone 2: the phone boots into Linux.**
-- [ ] **P5.5** Headless tuning: panel off from boot (OLED burn-in), charge limit 70–80 %, `unattended-upgrades`. No notification LED on the Pixel 5: pick an alive signal (short vibration at boot, or a tiny dim pixel moving on the AMOLED). Owner decides.
+- [ ] **P5.5** _2026-11-19: panel undriven after the bootloader splash; SOC from our QGauge client (`pixel5-qgauge`, was frozen at 53 %); charge limit 70–80 % works (input cut above 80, Test 24); unattended-upgrades on. Left: alive signal (owner)._ Headless tuning: panel off from boot (OLED burn-in), charge limit 70–80 %, `unattended-upgrades`. No notification LED on the Pixel 5: pick an alive signal (short vibration at boot, or a tiny dim pixel moving on the AMOLED). Owner decides.
 
 ## Phase 6: Mainline kernel (weeks; research-heavy, mirrors Pixel 2 P8.3)
 Source: `docs/research/mainline.md`. No mainline kernel has ever been shown booting on redfin.
