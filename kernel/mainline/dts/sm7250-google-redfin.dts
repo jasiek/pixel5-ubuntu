@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Google Pixel 5 (redfin), SM7250. First-gate board file (P6.3): enough to
+ * reach an initramfs over UFS + USB2 with a mainline kernel.
+ *
+ * Hardware values come from the DT the bootloader hands the stock 4.19
+ * kernel (firmware/live.dtb: base DTB + dtbo overlay 25, Redfin PVT) and the
+ * downstream sources (lito-redfin*.dtsi). See docs/research/mainline-boot.md.
+ */
+/dts-v1/;
+
+#include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include "sm7250.dtsi"
+#include "pm8150.dtsi"
+#include "pm8150l.dtsi"
+#include "sm7250-google-redfin-dtbo-sink.dtsi"
+
+/ {
+	/*
+	 * model, msm-id and board-id are exactly those of the stock base DTB
+	 * in vendor_boot, which the bootloader is known to pick (Test 27).
+	 * The dtbo overlay then replaces every existing root property: Linux
+	 * sees model "Google Inc. MSM sm7250 v2 Redfin PVT" and compatible
+	 * "google,redfin-sm7250", "qcom,sm7250" (live DT).
+	 */
+	model = "Qualcomm Technologies, Inc. Lito SoC";
+	compatible = "google,redfin", "qcom,sm7250";
+	chassis-type = "handset";
+	qcom,msm-id = <QCOM_ID_SM7250 0x10000>, <440 0x10000>;
+	qcom,board-id = <0 0>;
+
+	/* The bootloader fills in bootargs, initrd, kaslr-seed (and cdt). */
+	chosen {
+	};
+
+	reserved-memory {
+		/*
+		 * Fixed regions of the live DT that sm7250.dtsi does not reserve.
+		 * The stock overlay's own carve-outs land in the sink, so all of
+		 * them are repeated here.
+		 */
+		sec_apps_mem: sec-apps@808ff000 {
+			reg = <0x0 0x808ff000 0x0 0x1000>;
+			no-map;
+		};
+
+		qtee_apps_mem: qtee-apps@81e00000 {
+			reg = <0x0 0x81e00000 0x0 0x2600000>;
+			no-map;
+		};
+
+		pil_reserved_mem: pil-reserved@8bc17400 {
+			reg = <0x0 0x8bc17400 0x0 0x3e8c00>;
+			no-map;
+		};
+
+		/* Bootloader splash; also the display ramdump area */
+		cont_splash_mem: cont-splash@a0000000 {
+			reg = <0x0 0xa0000000 0x0 0x2300000>;
+			no-map;
+		};
+
+		dfps_data_mem: dfps-data@a2300000 {
+			reg = <0x0 0xa2300000 0x0 0x100000>;
+			no-map;
+		};
+
+		debug_info_mem: debug-info@b7e01000 {
+			reg = <0x0 0xb7e01000 0x0 0x40000>;
+			no-map;
+		};
+
+		/*
+		 * Stock ramoops, alt copy and metadata. Not used as pstore:
+		 * neither a warm reboot nor a panic reboot keeps it (Test 28).
+		 */
+		ramoops_mem: ramoops@b7e41000 {
+			reg = <0x0 0xb7e41000 0x0 0x400000>;
+			no-map;
+		};
+
+		alt_ramoops_mem: alt-ramoops@b8241000 {
+			reg = <0x0 0xb8241000 0x0 0x400000>;
+			no-map;
+		};
+
+		ramoops_meta_mem: ramoops-meta@b8641000 {
+			reg = <0x0 0xb8641000 0x0 0x1000>;
+			no-map;
+		};
+
+		ramdumplog_mem: ramdumplog@b8642000 {
+			reg = <0x0 0xb8642000 0x0 0x10000>;
+			no-map;
+		};
+
+		kregistry_mem: kregistry@c8000000 {
+			reg = <0x0 0xc8000000 0x0 0x10000>;
+			no-map;
+		};
+	};
+};
+
+/* Live DT: the redfin overlay grows the modem + WLAN region to 0x11800000. */
+&modem_wlan_mem {
+	reg = <0x0 0x8c000000 0x0 0x11800000>;
+};
+
+&soc {
+	/* Same APSS watchdog block as SM8250 (live DT: qcom,wdt@17c10000). */
+	watchdog@17c10000 {
+		compatible = "qcom,apss-wdt-sm7250", "qcom,kpss-wdt";
+		reg = <0x0 0x17c10000 0x0 0x1000>;
+		clocks = <&sleep_clk>;
+		interrupts = <GIC_SPI 0 IRQ_TYPE_EDGE_RISING>;
+	};
+};
+
+&apps_rsc {
+	/*
+	 * Only the UFS and USB HS PHY supplies (live DT phandles resolved):
+	 * UFS vcc = pm8150a_l7 (2.7-3.3 V, vcc-voltage-level 2.952-2.96 V),
+	 * vccq2 = pm8150_s4 (1.8 V), UFS PHY = pm8150_l5 + pm8150_l9,
+	 * HS PHY = pm8150_l5 (asks 0.88 V), pm8150_l12, pm8150_l2.
+	 */
+	regulators-0 {
+		compatible = "qcom,pm8150-rpmh-regulators";
+		qcom,pmic-id = "a";
+
+		vreg_s4a_1p8: smps4 {
+			regulator-name = "vreg_s4a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			/* main 1.8 V I/O rail */
+			regulator-always-on;
+		};
+
+		vreg_l2a_3p1: ldo2 {
+			regulator-name = "vreg_l2a_3p1";
+			regulator-min-microvolt = <3072000>;
+			regulator-max-microvolt = <3072000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l5a_0p88: ldo5 {
+			regulator-name = "vreg_l5a_0p88";
+			regulator-min-microvolt = <880000>;
+			regulator-max-microvolt = <880000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l9a_1p2: ldo9 {
+			regulator-name = "vreg_l9a_1p2";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l12a_1p8: ldo12 {
+			regulator-name = "vreg_l12a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	regulators-1 {
+		compatible = "qcom,pm8150l-rpmh-regulators";
+		qcom,pmic-id = "c";
+
+		vreg_l7c_2p96: ldo7 {
+			regulator-name = "vreg_l7c_2p96";
+			regulator-min-microvolt = <2952000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+};
+
+/* reboot("bootloader") -> PON reason 0x2 -> ABL stays in fastboot */
+&pon {
+	mode-bootloader = <0x2>;
+	mode-recovery = <0x1>;
+};
+
+&pon_pwrkey {
+	status = "okay";
+};
+
+&pon_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
+};
+
+&ufs_mem_hc {
+	reset-gpios = <&tlmm 146 GPIO_ACTIVE_LOW>;	/* ufs_reset pad */
+	vcc-supply = <&vreg_l7c_2p96>;
+	vccq2-supply = <&vreg_s4a_1p8>;
+	status = "okay";
+};
+
+&ufs_mem_phy {
+	vdda-phy-supply = <&vreg_l5a_0p88>;
+	vdda-pll-supply = <&vreg_l9a_1p2>;
+	status = "okay";
+};
+
+&usb_1 {
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	qcom,select-utmi-as-pipe-clk;
+	status = "okay";
+};
+
+&usb_1_hsphy {
+	vdda-pll-supply = <&vreg_l5a_0p88>;
+	vdda18-supply = <&vreg_l12a_1p8>;
+	vdda33-supply = <&vreg_l2a_3p1>;
+	status = "okay";
+};

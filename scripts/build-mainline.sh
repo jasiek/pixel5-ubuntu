@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 # Build the mainline kernel (P6): external/linux-next + kernel/mainline/series.
 #   scripts/build-mainline.sh     -> build/mainline/out/arch/arm64/boot/Image
+#                                    and .../dts/qcom/sm7250-google-redfin.dtb
+# Our DTS files (kernel/mainline/dts/) are copied into the worktree each run.
 # The submodule is never patched: the series is applied with `git am` in a
 # worktree at build/mainline/src (one commit per patch, so failures bisect),
 # rebuilt only when the stamp of (pin, series, patch files) changes.
@@ -65,6 +67,15 @@ while IFS= read -r line; do
 done < "$FRAG"
 [ $missing = 0 ] && echo "fragment: all options applied"
 
-make "${ARGS[@]}" -j"$(nproc)" Image "$@"
+DTS=arch/arm64/boot/dts/qcom
+cp /work/kernel/mainline/dts/*.dts* "$SRC/$DTS/"
+make "${ARGS[@]}" -j"$(nproc)" Image qcom/sm7250-google-redfin.dtb "$@"
+# The dtbo sink only works if real labels are not exported (no dtc -@):
+# __symbols__ must hold exactly the sink's own entries.
+DTB=$OUT/$DTS/sm7250-google-redfin.dtb
+nsym=$(fdtget -p "$DTB" /__symbols__ | wc -l)
+nsink=$(grep -c '= "/redfin-dtbo-sink/' "$SRC/$DTS/sm7250-google-redfin-dtbo-sink.dtsi")
+[ "$nsym" = "$nsink" ] || { echo "DTB exports $nsym symbols, sink has $nsink (built with -@?)" >&2; exit 1; }
+echo "dtb: $(stat -c %s "$DTB") bytes, $nsym symbols (all sink)"
 echo "mainline $(cat "$OUT/include/config/kernel.release")"
 ls -la "$OUT/arch/arm64/boot/Image"

@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P6.3 (redfin board DTS), then P6.2 test T0b (docs/research/mainline-boot.md).
+## ▶ RESUME HERE: P6.2 test T1 (first mainline boot, `fastboot boot`, reboot-to-bootloader initramfs; docs/research/mainline-boot.md §6).
 
 ---
 
@@ -114,7 +114,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
   3. chainload upstream U-Boot (then every kernel test is a plain `fastboot boot`).
   - No UART: debug through pstore/ramoops and USB serial from our initramfs. Kernel loads at offset 0x80000 if ABL insists.
   - Gate: mainline reaches our initramfs and USB serial works.
-- [ ] **P6.3** `kernel/mainline/sm7250-google-redfin.dts` from the downstream DT (`lito-redfin*.dtsi`) and `firmware/live.dtb` (P2.5).
+- [x] **P6.3** _First gate done 2026-11-19: `kernel/mainline/dts/sm7250-google-redfin.dts` + generated dtbo sink (177 labels); all 36 overlays apply offline with 0 diff outside the sink (T0c). Grows per P6.4 item._ `kernel/mainline/dts/sm7250-google-redfin.dts` from the downstream DT (`lito-redfin*.dtsi`) and `firmware/live.dtb` (P2.5).
 - [ ] **P6.4** Bring-up, one change per test image, each `fastboot boot` or inactive slot only:
   - [ ] UFS + USB2 gadget + rootfs (nairo patches; 32-bit DMA mask)
   - [ ] Charger (SMB5) + fuel gauge (QGauge), cpufreq + thermal
