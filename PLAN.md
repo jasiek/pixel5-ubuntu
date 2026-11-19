@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P3.6 (record uname, failed units, dmesg errors), then Phase 4 wifi.
+## ▶ RESUME HERE: P4.1 (vendor + modem firmware mounted where the kernel looks).
 
 ---
 
@@ -86,7 +86,7 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
 - [x] **P3.4** _Done 2026-11-19 (Tests 16-18): label read from the ext4 superblock (no blkid in busybox); growfs by systemd (`x-systemd.growfs`), 4 GiB → 107.3 GiB on first boot._ initramfs: find userdata by partlabel, `resize2fs` once, `switch_root`; debug shell on failure.
 - [x] **P3.5** _Done 2026-11-19 (Test 18): owner OK; userdata flashed; SSH 22 s after `fastboot boot` once the kernel accepted NM's route (`kernel/patches/0001`)._ ⚠️ (owner OK) `fastboot flash userdata build/rootfs.simg`, then `scripts/try-boot.sh build/boot.img`.
   - Gate: `ssh ubuntu@172.16.42.1` works. 🎉 **Milestone 1: Ubuntu 24.04 runs on the Pixel 5.**
-- [ ] **P3.6** Save `uname -a`, `systemctl --failed`, notable `dmesg` errors in `docs/log.md`.
+- [x] **P3.6** _Done 2026-11-19: in `docs/log.md` (0 failed units; 438 dmesg errors, mostly remote-processor services not up yet; charging works)._ Save `uname -a`, `systemctl --failed`, notable `dmesg` errors in `docs/log.md`.
 
 ## Phase 4: Wifi on the downstream kernel (2 h – 3 days)
 - [ ] **P4.1** systemd units: vendor (dm-linear from super, P2.6) and `modem_a` mounted read-only where the kernel looks for firmware.
