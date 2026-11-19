@@ -39,6 +39,25 @@ log "started, kernel $(uname -r)"
 #    2 = modules loaded, 3 = USB gadget bound.
 #  - initdebug: the fastboot-return timer starts here, before anything that
 #    can hang (Test 1: an image that hung before the old timer never came back).
+# ---- early modules: watchdog + restart driver -----------------------------
+# The bootloader leaves the Qualcomm hardware watchdog running; Android loads
+# watchdog_v2.ko within 0.5 s to feed it. Without it the phone cold-resets
+# after ~100 s (Tests 2b-4: boot reason "watchdog"). msm-poweroff.ko is what
+# makes `reboot bootloader` land in fastboot (it writes the restart reason).
+# Dependencies come from modules.dep (loaded last-listed first, as modprobe
+# does). Missing modules are fine: our own kernel may build these in.
+load_mod() {
+    deps=$(sed -n "s|^/lib/modules/$1\.ko:||p" /lib/modules/modules.dep 2>/dev/null)
+    rev=""
+    for d in $deps; do rev="$d $rev"; done
+    for d in $rev; do insmod "$d" 2>/dev/null; done
+    insmod "/lib/modules/$1.ko" 2>/dev/null
+}
+for m in watchdog_v2 spmi-pmic-arb qcom-spmi-pmic qpnp-power-on msm-poweroff; do
+    load_mod "$m"
+done
+log "early modules: $(grep -c -E '^(watchdog_v2|msm_poweroff|qpnp_power_on) ' /proc/modules) of 3 key ones loaded"
+
 stage() {
     if grep -qw "initstage=$1" /proc/cmdline; then
         # initstage_delay=S: wait S seconds first, so the return time shifts
