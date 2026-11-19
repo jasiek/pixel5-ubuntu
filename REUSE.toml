@@ -1,0 +1,35 @@
+# Machine-readable licensing (https://reuse.software). Human version:
+# LICENSING.md. A file's own SPDX header wins over these defaults ("closest").
+version = 1
+
+# Default for original material: MIT.
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 The pixel5-ubuntu contributors"
+SPDX-License-Identifier = "MIT"
+
+# Documentation and the license overview: prose, no header possible
+# without breaking Markdown headings.
+[[annotations]]
+path = ["**/*.md", "LICENSE"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The pixel5-ubuntu contributors"
+SPDX-License-Identifier = "MIT"
+
+# Kernel patches modify GPL-2.0 files; the patch format has no place for a
+# header.
+[[annotations]]
+path = ["kernel/**/*.patch"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 The pixel5-ubuntu contributors"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+# Device trees: GPL-2.0-only headers in the files. They carry values from
+# the vendor redbull/redfin DTs (Google, Qualcomm; GPL-2.0) and build on
+# other people's SM7250 DTs.
+[[annotations]]
+path = ["kernel/**/*.dts", "kernel/**/*.dtsi"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The pixel5-ubuntu contributors"
+SPDX-License-Identifier = "GPL-2.0-only"

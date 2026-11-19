@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P0.3 (licensing).
+## ▶ RESUME HERE: P0.4 (submodules).
 
 ---
 
@@ -44,7 +44,7 @@ Background: `docs/research.md` (summary) and `docs/research/*.md` (full agent re
 - [x] **P0.1** _Done 2026-11-18: `PLAN.md`, `CLAUDE.md`, `README.md`, `docs/research.md` + `docs/research/`, `docs/log.md`, `.gitignore`._
 - [x] **P0.2** _Done 2026-11-19: scripts (dev, check-prereqs, ssh, try-boot, initrd-sh, serial-sh, push-overlay, build-initramfs), initramfs/, one docker/Dockerfile (24.04 + LLVM 18 + rootfs tools; the 20.04/clang-11 image was 4.4-only). `dev.sh uname -m` → aarch64; initramfs builds; no walleye in scripts/._ Copy the generic tooling from the Pixel 2 repo (list: `docs/research/pixel2-transfer.md`, "REUSE AS-IS"): `scripts/dev.sh`, `check-prereqs.sh`, `ssh.sh`, `try-boot.sh`, `initrd-sh.py`, `serial-sh.py`, `push-overlay.sh`, `docker/Dockerfile`, the busybox initramfs skeleton. Rename `pixel2`→`pixel5`, `PIXEL2_HOST`→`PIXEL5_HOST`.
   - Gate: `scripts/dev.sh uname -m` prints `aarch64`; `grep -rn walleye scripts/` is empty.
-- [ ] **P0.3** Licensing from day one (Pixel 2 P10 done up front): `LICENSE` (MIT), `LICENSING.md`, `LICENSES/`, `REUSE.toml`, SPDX headers.
+- [x] **P0.3** _Done 2026-11-19: `LICENSE` (MIT), `LICENSING.md`, `LICENSES/MIT.txt`, `REUSE.toml` (MIT default, GPL-2.0-only for kernel patches/DTs), `scripts/reuse-lint.sh`. Compliant, 25/25 files. GPL-2.0 text gets added with the first kernel file (REUSE rejects unused license texts)._ Licensing from day one (Pixel 2 P10 done up front): `LICENSE` (MIT), `LICENSING.md`, `LICENSES/`, `REUSE.toml`, SPDX headers.
   - Gate: `reuse lint` passes.
 - [ ] **P0.4** _Clone moved to `/Volumes/Pixel2Dev/pixel5-ubuntu` (case-sensitive) on 2026-11-19._ Submodules (shallow, pinned): `external/mkbootimg`, `external/avb` (avbtool), `external/kernel-redbull` (LineageOS `android_kernel_google_redbull`, branch `lineage-24.0`), `external/qbootctl`, `external/pil-squasher`, `external/parse-android-dynparts`. Mainline trees come in P6.1.
   - Record each branch + commit in `docs/log.md`.
