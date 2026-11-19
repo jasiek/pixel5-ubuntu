@@ -13,3 +13,22 @@ mountpoint -q /vendor/firmware_mnt || \
     mount -t vfat -o ro,uid=0,gid=0,dmask=0022,fmask=0133,shortname=lower \
         "/dev/disk/by-partlabel/modem$slot" /vendor/firmware_mnt
 echo "vendor$slot on /vendor, modem$slot on /vendor/firmware_mnt (read-only)"
+
+# One firmware directory for the kernel loader (and the modem daemons): the
+# kernel takes a single extra search dir, firmware_class.path. Names are
+# relative (modem.mdt, wlan/qca_cld/WCNSS_qcom_cfg.ini); the two trees have
+# no names in common (checked 2026-11-19).
+FW=/run/pixel5-fw
+rm -rf "$FW"; mkdir -p "$FW"
+for d in /vendor/firmware /vendor/firmware_mnt/image; do
+    for f in "$d"/*; do ln -sfn "$f" "$FW/${f##*/}"; done
+done
+printf %s "$FW" > /sys/module/firmware_class/parameters/path
+echo "firmware path $FW: $(ls "$FW" | wc -l) entries"
+
+# A remote processor crash restarts that processor only. The default SYSTEM
+# level panics the kernel (subsystem_restart.c), i.e. reboots the phone.
+for s in /sys/bus/msm_subsys/devices/*; do
+    echo RELATED > "$s/restart_level"
+done
+echo "restart_level RELATED: $(cat /sys/bus/msm_subsys/devices/*/name | tr '\n' ' ')"
