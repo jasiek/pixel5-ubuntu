@@ -213,6 +213,8 @@
 
 &pm7250b_qg {
 	monitored-battery = <&battery>;
+	/* Its status comes from the charger; unlinked it always says Discharging. */
+	power-supplies = <&pm7250b_charger>;
 	status = "okay";
 };
 

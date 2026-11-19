@@ -10,8 +10,16 @@
 # crash leaves the phone charging (the default, under the float voltage the
 # bootloader set), never with the input cut and nobody watching SOC.
 set -eu
-chg=/sys/class/power_supply/pmi8998_charger
 bat=/sys/class/power_supply/qcom-qg
+# The charger supply is named after the PMIC match data (pm8150b-charger
+# for the PM7250B): take the one of type USB.
+find_chg() {
+    for p in /sys/class/power_supply/*; do
+        [ "$(cat "$p/type" 2>/dev/null)" = USB ] && { echo "$p"; return; }
+    done
+    echo /nonexistent
+}
+chg=$(find_chg)
 
 if [ "${1:-}" = off ]; then
     [ -w "$chg/status" ] && echo 1 > "$chg/status"
@@ -26,6 +34,7 @@ until [ -r "$bat/capacity" ] && [ -w "$chg/status" ]; do
     n=$((n + 1))
     [ $n -le 60 ] || { echo "charge hold: no charger or fuel gauge" >&2; exit 1; }
     sleep 2
+    chg=$(find_chg)
 done
 
 echo "charge hold: input off at ${stop} %, on at ${start} %"
