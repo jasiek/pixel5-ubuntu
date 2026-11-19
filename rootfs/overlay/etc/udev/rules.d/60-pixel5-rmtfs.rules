@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+# The downstream kernel exposes the modem's remote-storage shared memory as a
+# UIO device named "rmtfs" (msm_sharedmem), not /dev/qcom_rmtfs_mem1. rmtfs
+# falls back to /dev/qcom_rmtfs_uio1.
+SUBSYSTEM=="uio", ATTR{name}=="rmtfs", SYMLINK+="qcom_rmtfs_uio1"

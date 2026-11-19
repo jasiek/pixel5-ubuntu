@@ -1,0 +1,70 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: MIT
+"""Print qcacld (wlan.ko) host logs, which never reach dmesg.
+
+    pixel5-wlan-logs            (until Ctrl-C)
+
+Once its logger is up, qcacld sends its log lines to the "host_logs"
+multicast group of the cld80211 generic-netlink family (cnss_nl.ko), for
+Android's cnss_diag. Messages nobody listens to are dropped. This joins
+host_logs and fatal_events and prints the text in each message.
+"""
+import re
+import socket
+import struct
+import sys
+
+NETLINK_GENERIC, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP = 16, 270, 1
+GENL_ID_CTRL, CTRL_CMD_GETFAMILY = 0x10, 3
+CTRL_ATTR_FAMILY_NAME, CTRL_ATTR_MCAST_GROUPS = 2, 7
+CTRL_ATTR_MCAST_GRP_NAME, CTRL_ATTR_MCAST_GRP_ID = 1, 2
+NLM_F_REQUEST = 1
+
+
+def attrs(buf):
+    out, i = {}, 0
+    while i + 4 <= len(buf):
+        n, t = struct.unpack_from("<HH", buf, i)
+        if n < 4:
+            break
+        out.setdefault(t & 0x3FFF, []).append(buf[i + 4:i + n])
+        i += (n + 3) & ~3
+    return out
+
+
+def groups(sock, family):
+    name = family.encode() + b"\0"
+    a = struct.pack("<HH", 4 + len(name), CTRL_ATTR_FAMILY_NAME) + name
+    a += b"\0" * (-len(a) % 4)
+    msg = struct.pack("<BBH", CTRL_CMD_GETFAMILY, 1, 0) + a
+    sock.send(struct.pack("<IHHII", 16 + len(msg), GENL_ID_CTRL, NLM_F_REQUEST, 1, 0) + msg)
+    data = sock.recv(65536)
+    _len, mtype = struct.unpack_from("<IH", data)
+    if mtype == 2:  # NLMSG_ERROR
+        sys.exit(f"no generic netlink family {family} (is cnss_nl loaded?)")
+    out = {}
+    for blob in attrs(data[20:]).get(CTRL_ATTR_MCAST_GROUPS, []):
+        for grp in attrs(blob).values():
+            g = attrs(grp[0])
+            out[g[CTRL_ATTR_MCAST_GRP_NAME][0].rstrip(b"\0").decode()] = \
+                struct.unpack("<I", g[CTRL_ATTR_MCAST_GRP_ID][0])[0]
+    return out
+
+
+def main():
+    sock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_GENERIC)
+    sock.bind((0, 0))
+    grp = groups(sock, "cld80211")
+    for name in ("host_logs", "fatal_events"):
+        sock.setsockopt(SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, grp[name])
+    print("listening:", ", ".join(f"{k}={v}" for k, v in sorted(grp.items())), flush=True)
+    text = re.compile(rb"[\x20-\x7e\t\n]{6,}")
+    while True:
+        data = sock.recv(1 << 20)
+        for run in text.findall(data):
+            for line in run.decode().splitlines():
+                if line.strip():
+                    print(line, flush=True)
+
+
+main()

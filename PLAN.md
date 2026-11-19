@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P4.2 (modem + wlan bring-up; research in docs/research/wifi-downstream.md).
+## ▶ RESUME HERE: P4.4 gate (SSH over wifi, cable unplugged), then P5.4 (cold boots + 5 reboots).
 
 ---
 
@@ -90,9 +90,9 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
 
 ## Phase 4: Wifi on the downstream kernel (2 h – 3 days)
 - [x] **P4.1** _Done 2026-11-19: `pixel5-dynparts` (LP metadata for the active slot → dm-linear, read-only) + `pixel5-firmware.service`: `/vendor` and `/vendor/firmware_mnt` (modem_b) mounted read-only at boot._ systemd units: vendor (dm-linear from super, P2.6) and `modem_a` mounted read-only where the kernel looks for firmware.
-- [ ] **P4.2** Gate: `wlan0` exists. WCN3990 needs the modem up first.
-- [ ] **P4.3** No `wlan0`? Try the open-source daemons first (`rmtfs`, `tqftpserv`, `pd-mapper`, `qrtr`; start order from the Pixel 2 mainline lesson: tqftpserv + diag before `rmtfs -s`). Then fall back to running vendor daemons (`cnss-daemon` etc.) directly, as the Pixel 2 did on 4.4 (its dropped `android-env` helpers).
-- [ ] **P4.4** Stable MAC (generate once, persist), `nmcli dev wifi connect`, baked-in NM profile.
+- [x] **P4.2** _Done 2026-11-19 (Tests 19–22): qrtr-ns, pd-mapper + tqftpserv (ours), rmtfs (UIO), `/dev/ipa`, `wlan.ko`, modem held open, then our `pixel5-wlfw-bdf` (BDF + cal report) → FW ready → wlan0. All at boot via `pixel5-wifi.service` with a crash guard._ Gate: `wlan0` exists. WCN3990 needs the modem up first.
+- [x] **P4.3** _Done 2026-11-19: open-source daemons only, plus a 150-line Python WLFW client instead of cnss-daemon. No vendor daemons._ No `wlan0`? Try the open-source daemons first (`rmtfs`, `tqftpserv`, `pd-mapper`, `qrtr`; start order from the Pixel 2 mainline lesson: tqftpserv + diag before `rmtfs -s`). Then fall back to running vendor daemons (`cnss-daemon` etc.) directly, as the Pixel 2 did on 4.4 (its dropped `android-env` helpers).
+- [ ] **P4.4** _2026-11-19: MAC = factory (google_wlan_mac), no generation needed; NM profile baked in and autoconnects (HTTPS over wlan0). Left: the gate with the cable unplugged._ Stable MAC (generate once, persist), `nmcli dev wifi connect`, baked-in NM profile.
   - Gate: `ssh ubuntu@pixel5.local` with the cable unplugged.
 
 ## Phase 5: Make it permanent (1–2 h, ⚠️ flashes)

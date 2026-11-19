@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+# Boots the modem (which also runs the WLAN firmware, msm/modem/wlan_pd) and
+# keeps it up: the downstream kernel powers a subsystem up on the first open
+# of /dev/subsys_<name> and down on the last close. On Android pm-service
+# holds it. Started by pixel5-wifi-up.
+[Unit]
+Description=Hold the modem subsystem up
+Wants=rmtfs.service tqftpserv.service pd-mapper.service
+After=rmtfs.service tqftpserv.service pd-mapper.service
+
+[Service]
+# The modem asks for its files and services right away: wait until rmtfs (14),
+# pd-mapper (64) and tqftpserv (4096) are registered with the name service.
+ExecStartPre=/usr/local/sbin/pixel5-qrtr-wait 14 64 4096
+ExecStart=/bin/sh -c 'exec 3</dev/subsys_modem; exec sleep infinity'

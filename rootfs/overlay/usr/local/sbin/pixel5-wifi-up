@@ -1,0 +1,34 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Wifi bring-up, in the order that worked by hand (docs/log.md, Test 20-21).
+#
+# Crash guard: wlan.ko is built with PANIC_ON_BUG and a panic reboots the
+# phone, which would come straight back here. A marker is set before the
+# bring-up and cleared 3 min into the boot (pixel5-wifi-ok.timer). If it is
+# still there at the next boot, that boot died: wifi stays off until
+#   sudo rm /var/lib/pixel5/wifi-disabled
+set -eu
+D=/var/lib/pixel5
+mkdir -p "$D"
+if [ -e "$D/wifi-disabled" ]; then
+    echo "wifi disabled ($D/wifi-disabled: a boot died during wifi bring-up)"
+    exit 0
+fi
+boot=$(cat /proc/sys/kernel/random/boot_id)
+if [ -e "$D/wifi-pending" ] && [ "$(cat "$D/wifi-pending")" != "$boot" ]; then
+    mv "$D/wifi-pending" "$D/wifi-disabled"
+    echo "previous boot died within 3 min of wifi bring-up: wifi disabled"
+    exit 0
+fi
+# (A marker from this boot means the unit was restarted, not a crash.)
+echo "$boot" > "$D/wifi-pending"
+sync
+
+# IPA firmware (Android: init.sm7250.rc "write /dev/ipa 1"). Until then IPA
+# reports its SMMU as bypassed and wlan.ko's probe fails (SMMU mismatch).
+printf 1 > /dev/ipa
+# No modalias: udev never loads it. It probes once the firmware is ready.
+modprobe wlan
+systemctl start --no-block pixel5-modem.service
+# Board data + calibration report (cnss-daemon's job on Android).
+/usr/local/sbin/pixel5-wlfw-bdf

@@ -1,0 +1,163 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: MIT
+"""Send the WLAN board data file (BDF) to the WLAN firmware over QMI/QRTR.
+
+    pixel5-wlfw-bdf [--cap-only|--cal-only] [bdf-file]   (default: bdwlan-redfin.bin)
+
+On Android, cnss-daemon does this. The downstream icnss v1 driver connects to
+the firmware's WLFW service (0x45 v1) but never sends the BDF; until it gets
+one, the firmware never says FW_READY, and wlan.ko never creates wlan0.
+Message layout: drivers/soc/qcom/wlan_firmware_service_v01.{c,h} in the
+kernel tree (QMI_WLFW_CAP_REQ 0x24, QMI_WLFW_BDF_DOWNLOAD_REQ 0x25,
+QMI_WLFW_CAL_REPORT_REQ 0x26). The order (BDF, then a calibration report with
+no stored calibration) follows mainline ath10k (drivers/net/wireless/ath/
+ath10k/qmi.c), which talks to the same firmware service.
+"""
+import os
+import socket
+import struct
+import sys
+import time
+
+FW_DIR = "/run/pixel5-fw"
+WLFW_SERVICE, WLFW_VERSION, WLFW_INSTANCE = 0x45, 1, 0
+QRTR_PORT_CTRL = 0xFFFFFFFE
+QRTR_TYPE_NEW_SERVER, QRTR_TYPE_NEW_LOOKUP = 4, 10
+CAP_REQ, BDF_DOWNLOAD_REQ, CAL_REPORT_REQ = 0x24, 0x25, 0x26
+SEGMENT = 6144                  # QMI_WLFW_MAX_DATA_SIZE_V01
+BDF_TYPE_BIN, BDF_TYPE_ELF = 0, 1
+TIMEOUT = 10
+WAIT = 180          # for the WLFW service to appear (modem boot + wlan_pd)
+SETTLE = 2          # let icnss finish msa_ready/cap before we talk
+ATTEMPTS = 5
+
+
+def lookup(sock):
+    """Ask the QRTR name service where WLFW lives; returns (node, port)."""
+    node, _port = sock.getsockname()
+    instance = WLFW_VERSION | (WLFW_INSTANCE << 8)
+    sock.sendto(struct.pack("<5I", QRTR_TYPE_NEW_LOOKUP, WLFW_SERVICE, instance, 0, 0),
+                (node, QRTR_PORT_CTRL))
+    # The lookup stays subscribed: after the end-of-list marker (service 0),
+    # a NEW_SERVER arrives when the service registers (modem boot).
+    sock.settimeout(WAIT)
+    try:
+        while True:
+            pkt, _ = sock.recvfrom(64)
+            cmd, service, _inst, s_node, s_port = struct.unpack_from("<5I", pkt)
+            if cmd != QRTR_TYPE_NEW_SERVER:
+                continue
+            if service == 0:
+                print(f"waiting up to {WAIT} s for the WLFW service ...", flush=True)
+            elif service == WLFW_SERVICE:
+                return s_node, s_port
+    except socket.timeout:
+        sys.exit(f"no WLFW service after {WAIT} s (is the modem up?)")
+    finally:
+        sock.settimeout(TIMEOUT)
+
+
+def tlvs(buf):
+    out, i = {}, 0
+    while i + 3 <= len(buf):
+        t, n = struct.unpack_from("<BH", buf, i)
+        out[t] = buf[i + 3:i + 3 + n]
+        i += 3 + n
+    return out
+
+
+class Wlfw:
+    def __init__(self):
+        self.sock = socket.socket(socket.AF_QIPCRTR, socket.SOCK_DGRAM)
+        self.sock.settimeout(TIMEOUT)
+        self.addr = lookup(self.sock)
+        self.txn = 0
+
+    def call(self, msg_id, body):
+        self.txn += 1
+        self.sock.sendto(struct.pack("<BHHH", 0, self.txn, msg_id, len(body)) + body, self.addr)
+        while True:
+            pkt, src = self.sock.recvfrom(65536)
+            kind, txn, mid, n = struct.unpack_from("<BHHH", pkt)
+            if src == self.addr and kind == 2 and txn == self.txn and mid == msg_id:
+                t = tlvs(pkt[7:7 + n])
+                result, error = struct.unpack_from("<HH", t.get(0x02, b"\xff\xff\xff\xff"))
+                return result, error, t
+
+
+def tlv(t, fmt, *vals):
+    v = struct.pack("<" + fmt, *vals)
+    return struct.pack("<BH", t, len(v)) + v
+
+
+def cap(w):
+    result, error, t = w.call(CAP_REQ, b"")
+    if result:
+        print(f"cap: result {result} error {error}")
+        return
+    info = []
+    if 0x10 in t:
+        info.append("chip_id %#x family %#x" % struct.unpack_from("<II", t[0x10]))
+    if 0x11 in t:
+        info.append("board_id %#x" % struct.unpack_from("<I", t[0x11]))
+    if 0x12 in t:
+        info.append("soc_id %#x" % struct.unpack_from("<I", t[0x12]))
+    if 0x13 in t:
+        ver, = struct.unpack_from("<I", t[0x13])
+        info.append("fw %#x %s" % (ver, t[0x13][4:].split(b"\0")[0].decode(errors="replace")))
+    print("cap:", ", ".join(info))
+
+
+def send_bdf(w, path):
+    data = open(path, "rb").read()
+    kind = BDF_TYPE_ELF if data[:4] == b"\x7fELF" else BDF_TYPE_BIN
+    segs = max(1, (len(data) + SEGMENT - 1) // SEGMENT)
+    for seg in range(segs):
+        chunk = data[seg * SEGMENT:(seg + 1) * SEGMENT]
+        body = (tlv(0x01, "B", 1)
+                + tlv(0x10, "i", 0)                     # file_id: WLFW_CAL_TEMP_IDX_0
+                + tlv(0x11, "I", len(data))
+                + tlv(0x12, "I", seg)
+                + tlv(0x13, "H%ds" % len(chunk), len(chunk), chunk)   # u16 length + bytes
+                + tlv(0x14, "B", 1 if seg == segs - 1 else 0)
+                + tlv(0x15, "B", kind))
+        result, error, _ = w.call(BDF_DOWNLOAD_REQ, body)
+        if result:
+            raise RuntimeError(f"BDF segment {seg}/{segs}: result {result} error {error}")
+    print(f"BDF {os.path.basename(path)}: {len(data)} bytes, {segs} segments, "
+          f"type {'ELF' if kind else 'BIN'}: accepted")
+
+
+def cal_report(w):
+    # meta_data: a QMI_DATA_LEN (u8) count of stored calibration files, 0 here.
+    result, error, _ = w.call(CAL_REPORT_REQ, tlv(0x01, "B", 0))
+    if result:
+        raise RuntimeError(f"cal report: result {result} error {error}")
+    print("cal report (no stored calibration): accepted")
+
+
+def main():
+    args = sys.argv[1:]
+    cap_only, cal_only = "--cap-only" in args, "--cal-only" in args
+    args = [a for a in args if not a.startswith("--")]
+    path = args[0] if args else os.path.join(FW_DIR, "bdwlan-redfin.bin")
+    w = Wlfw()
+    print("WLFW at node %d port %d" % w.addr, flush=True)
+    time.sleep(SETTLE)
+    cap(w)
+    if cap_only:
+        return
+    # Not seen fail yet; retry rather than guess if the firmware is not ready.
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            if not cal_only:
+                send_bdf(w, path)
+            cal_report(w)
+            return
+        except (RuntimeError, socket.timeout) as e:
+            print(f"attempt {attempt}/{ATTEMPTS}: {e}", flush=True)
+            time.sleep(2)
+    sys.exit("giving up")
+
+
+main()
