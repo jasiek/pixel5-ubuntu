@@ -8,10 +8,18 @@
 # legacy LZ4 decoder only accepts more LZ4 legacy after it: a gzip archive
 # there fails with "Decoding failed" and is silently dropped, so the vendor's
 # recovery /init runs instead of ours (Test 1, Test 2).
+#
+# KMODS=1: ship our own kernel's modules (scripts/build-kernel.sh) for the
+# first-stage list, overriding the vendor ramdisk's (stock vermagic, won't
+# load into our kernel). Same file names, so ours replace theirs when the
+# ramdisks are merged. Load order: the vendor's modules.load
+# (MODLOAD=build/stock/vbx/lib/modules/modules.load); dependencies and
+# softdeps are generated from our modules with modinfo, flat /lib/modules
+# paths as the vendor uses.
 set -euo pipefail
 
 if [ ! -f /.dockerenv ]; then
-    exec "$(dirname "$0")/dev.sh" /work/scripts/build-initramfs.sh "$@"
+    exec "$(dirname "$0")/dev.sh" env KMODS="${KMODS:-0}" MODLOAD="${MODLOAD:-}" /work/scripts/build-initramfs.sh "$@"
 fi
 
 T=/tmp/initramfs
@@ -23,6 +31,44 @@ gcc -static -Os -s -o "$T/bin/reboot-bootloader" /work/initramfs/reboot-bootload
 # The kernel needs /dev/console before devtmpfs is mounted.
 mknod -m 600 "$T/dev/console" c 5 1
 mknod -m 666 "$T/dev/null" c 1 3
+
+if [ "${KMODS:-0}" = 1 ]; then
+    KD=$(echo /work/build/kernel/modules-install/lib/modules/*)
+    [ -d "$KD" ] || { echo "no modules: run scripts/build-kernel.sh" >&2; exit 1; }
+    LOADLIST=/work/${MODLOAD:-build/stock/vbx/lib/modules/modules.load}
+    [ -f "$LOADLIST" ] || { echo "no $LOADLIST" >&2; exit 1; }
+    M="$T/lib/modules"; mkdir -p "$M"
+    # name (with "_") -> path in our build
+    find "$KD" -name '*.ko' | while read -r f; do b=${f##*/}; echo "$(echo "${b%.ko}" | tr - _) $f"; done > /tmp/kmap
+    path_of() { sed -n "s|^$(echo "$1" | tr - _) ||p" /tmp/kmap; }
+    # Copy the list plus the closure of its hard dependencies.
+    todo=$(cat "$LOADLIST")
+    while [ -n "$todo" ]; do
+        next=""
+        for m in $todo; do
+            n=${m##*/}; n=${n%.ko}
+            src=$(path_of "$n"); [ -n "$src" ] || { echo "missing module $n" >&2; exit 1; }
+            dst="$M/${src##*/}"
+            [ -e "$dst" ] && continue
+            llvm-strip --strip-debug -o "$dst" "$src"
+            for d in $(modinfo -F depends "$src" | tr , ' '); do next="$next $d"; done
+        done
+        todo=$next
+    done
+    : > "$M/modules.dep"; : > "$M/modules.softdep"
+    for f in "$M"/*.ko; do
+        deps=""
+        for d in $(modinfo -F depends "$f" | tr , ' '); do
+            deps="$deps /lib/modules/$(basename "$(path_of "$d")")"
+        done
+        echo "/lib/modules/${f##*/}:$deps" >> "$M/modules.dep"
+        modinfo -F softdep "$f" | while read -r sd; do
+            [ -n "$sd" ] && echo "softdep $(modinfo -F name "$f") $sd" >> "$M/modules.softdep"
+        done
+    done
+    cp "$LOADLIST" "$M/modules.load"
+    echo "modules: $(ls "$M"/*.ko | wc -l) from $(basename "$KD"), $(wc -l < "$M/modules.softdep") softdeps"
+fi
 
 mkdir -p /work/build
 OUTF="/work/${2:-build/initramfs.cpio.lz4}"
