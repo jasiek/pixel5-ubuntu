@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P6.4: modem (nairo 0052–0056, 0058, 0069; 0058 needs the GPU DT patches 0033–0037 underneath, or our own nodes), rmtfs_mem at 0xf9900000 size 0x280000 (log: modem prep), then wifi.
+## ▶ RESUME HERE: **Owner first:** boot mainline once and look at the screen: is the white Google splash still lit (OLED burn-in hazard, docs/log.md after Test 95)? Then P6.4 GPU A620 (simpledrm first; it must take over or blank the panel).
 
 ---
 
@@ -118,7 +118,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
 - [ ] **P6.4** Bring-up, one change per test image, each `fastboot boot` or inactive slot only:
   - [x] UFS + USB2 gadget + rootfs (nairo patches; 32-bit DMA mask) _Done 2026-11-19 (Tests 83–86): reads/writes verified, our Ubuntu boots on mainline, SSH over USB in 22 s. Mainline modules installed (Test 87): Ubuntu on mainline `running`, 0 failed units._
   - [x] Charger (SMB5) + fuel gauge (QGauge), cpufreq + thermal _Done 2026-11-19 (Tests 88–91): qcom_smbx + qcom_qg (OCV tables generated from the phone's DT at build time), 80/70 hold via USB input suspend (`pixel5-charge-hold`), one full cycle verified; cpufreq (schedutil, 3 policies); 27 TSENS zones with 110 °C shutdown._
-  - [ ] Modem (MPSS PAS + Pixel SMEM socinfo quirk, tqftpserv `modem_pr/`, pd-mapper table) → wifi (ath10k_snoc, `board-2.bin` from vendor `bdwlan*`)
+  - [x] Modem (MPSS PAS + Pixel SMEM socinfo quirk, tqftpserv `modem_pr/`, pd-mapper table) → wifi (ath10k_snoc, `board-2.bin` from vendor `bdwlan*`) _Done 2026-11-19 (Tests 92–95): modem boots via qcom_q6v5_pas without the SMEM item; wifi at boot in 15–17 s with a stable MAC, SSH over wifi; board.bin = the phone's bdwlan-redfin.bin, firmware-5.bin pinned from linux-firmware. Not done: IPA/mobile data, calls._
   - [ ] GPU A620 (simpledrm first, then msm + Mesa)
   - [ ] Panel S6E3HC2 DSC command mode: **new driver** from downstream DCS sequences
   - [ ] Touch S6SY79x: **SPI transport** for `s6sy761`; GPIO 35 to the AP
