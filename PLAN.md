@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P0.4 (submodules).
+## ▶ RESUME HERE: phone needed for P1.1. Offline prep meanwhile: factory-image script, v3 boot image script, 4.19 test build.
 
 ---
 
@@ -46,7 +46,7 @@ Background: `docs/research.md` (summary) and `docs/research/*.md` (full agent re
   - Gate: `scripts/dev.sh uname -m` prints `aarch64`; `grep -rn walleye scripts/` is empty.
 - [x] **P0.3** _Done 2026-11-19: `LICENSE` (MIT), `LICENSING.md`, `LICENSES/MIT.txt`, `REUSE.toml` (MIT default, GPL-2.0-only for kernel patches/DTs), `scripts/reuse-lint.sh`. Compliant, 25/25 files. GPL-2.0 text gets added with the first kernel file (REUSE rejects unused license texts)._ Licensing from day one (Pixel 2 P10 done up front): `LICENSE` (MIT), `LICENSING.md`, `LICENSES/`, `REUSE.toml`, SPDX headers.
   - Gate: `reuse lint` passes.
-- [ ] **P0.4** _Clone moved to `/Volumes/Pixel2Dev/pixel5-ubuntu` (case-sensitive) on 2026-11-19._ Submodules (shallow, pinned): `external/mkbootimg`, `external/avb` (avbtool), `external/kernel-redbull` (LineageOS `android_kernel_google_redbull`, branch `lineage-24.0`), `external/qbootctl`, `external/pil-squasher`, `external/parse-android-dynparts`. Mainline trees come in P6.1.
+- [x] **P0.4** _Done 2026-11-19 (revisions in docs/log.md); added `external/lpunpack` for vendor.img out of super.img. Clone moved to `/Volumes/Pixel2Dev/pixel5-ubuntu` (case-sensitive) on 2026-11-19._ Submodules (shallow, pinned): `external/mkbootimg`, `external/avb` (avbtool), `external/kernel-redbull` (LineageOS `android_kernel_google_redbull`, branch `lineage-24.0`), `external/qbootctl`, `external/pil-squasher`, `external/parse-android-dynparts`. Mainline trees come in P6.1.
   - Record each branch + commit in `docs/log.md`.
 
 ## Phase 1: Phone prep (1–2 h, needs the phone, ⚠️ wipes it)

@@ -1,0 +1,28 @@
+[submodule "external/mkbootimg"]
+	path = external/mkbootimg
+	url = https://android.googlesource.com/platform/system/tools/mkbootimg
+	shallow = true
+[submodule "external/avb"]
+	path = external/avb
+	url = https://android.googlesource.com/platform/external/avb
+	shallow = true
+[submodule "external/qbootctl"]
+	path = external/qbootctl
+	url = https://github.com/linux-msm/qbootctl
+[submodule "external/pil-squasher"]
+	path = external/pil-squasher
+	url = https://github.com/linux-msm/pil-squasher
+	shallow = true
+[submodule "external/parse-android-dynparts"]
+	path = external/parse-android-dynparts
+	url = https://github.com/tchebb/parse-android-dynparts
+[submodule "external/lpunpack"]
+	path = external/lpunpack
+	url = https://github.com/unix3dgforce/lpunpack
+	shallow = true
+[submodule "external/kernel-redbull"]
+	path = external/kernel-redbull
+	url = https://github.com/LineageOS/android_kernel_google_redbull
+	branch = lineage-24.0
+	shallow = true
+	ignore = dirty
