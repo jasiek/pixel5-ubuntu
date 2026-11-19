@@ -5,8 +5,7 @@
 #
 #   scripts/initrd-pull.sh <path on phone> <local file>
 #
-# Same nc method as backup-nv.sh: the phone-side listener needs setsid and a
-# short wait, or it dies with the telnet session.
+# Same nc method as backup-nv.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ $# -eq 2 ] || { echo "usage: $0 <remote path> <local file>" >&2; exit 2; }
@@ -19,9 +18,15 @@ info=$(scripts/initrd-sh.py "cat '$remote' > /tmp/pull.bin && echo \"INFO \$(wc 
        | tr -d '\r' | sed -n 's/^INFO //p' | tail -n1)
 [ -n "$info" ] || { echo "$remote: could not read on the phone" >&2; exit 1; }
 read -r bytes sum <<< "$info"
-scripts/initrd-sh.py "setsid nc -l -p $PORT < /tmp/pull.bin >/dev/null 2>&1 & sleep 1" >/dev/null
+# The phone-side listener runs in the foreground of a telnet session that
+# stays open (in the background here) until the copy is done. Detaching it
+# (setsid, &) was flaky: it died with the session after 1 KiB.
+TIMEOUT=900 scripts/initrd-sh.py "nc -l -p $PORT < /tmp/pull.bin >/dev/null 2>&1" >/dev/null 2>&1 &
+lpid=$!
+sleep 2
 mkdir -p "$(dirname "$local_file")"
 nc "$PHONE" "$PORT" | head -c "$bytes" > "$local_file" || true
+wait "$lpid" || true
 got=$(shasum -a 256 "$local_file" | cut -d' ' -f1)
 [ "$got" = "$sum" ] || { echo "$remote: SHA-256 mismatch" >&2; exit 1; }
 scripts/initrd-sh.py "rm -f /tmp/pull.bin" >/dev/null

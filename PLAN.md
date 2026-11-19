@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P2.6 (vendor from super via dm-linear, modem_a read-only).
+## ▶ RESUME HERE: P3.2 gate (our 4.19.325 kernel + our modules reach the P2 debug shell).
 
 ---
 
@@ -75,7 +75,7 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
 - [x] **P2.4** _Done 2026-11-19: `scripts/backup-nv.sh`; persist, modemst1/2, fsg, fsc in `firmware/backup/` (mode 600), SHA-256 equal on phone and Mac._ ⚠️ **Backups before anything else touches the phone:** `dd` `persist`, `modemst1`, `modemst2`, `fsg`, `fsc` (IMEI + calibration) to `firmware/backup/` on the Mac.
   - Gate: SHA-256 equal on phone and Mac. Never committed, never leaves the Mac.
 - [x] **P2.5** _Done 2026-11-19: `firmware/live.dtb` (v2 Redfin PVT, board-id 0xb1e05), cmdline keys (panel `s6e3hc2` DSC cmd), LUN sizes, subsystems → `docs/device-info.md`. `scripts/initrd-pull.sh`._ Inventory: `/proc/cmdline` single keys only (never `serialno`), `/sys/firmware/fdt` → `firmware/live.dtb` (the DT **after** dtbo overlay; the board DTS reference for P6.3), `/dev/block/by-name`, LUN layout → `docs/device-info.md`.
-- [ ] **P2.6** Map `vendor_a` out of `super` with dm-linear (`parse-android-dynparts` + `dmsetup`) and mount it read-only; mount `modem_a` (vfat) read-only.
+- [x] **P2.6** _Done 2026-11-19: active slot is `_b`. `vendor_b` = 2 extents in super; hashed in place it equals the factory vendor.img (no dmsetup in busybox; dm-linear moves to P4.1). `modem_b` vfat mounted ro: modem.mdt/b00-b34, modem_pr, modemr.jsn._ Map `vendor_a` out of `super` with dm-linear (`parse-android-dynparts` + `dmsetup`) and mount it read-only; mount `modem_a` (vfat) read-only.
   - Gate: firmware lists match P1.6.
 
 ## Phase 3: Ubuntu on the downstream kernel (1–3 days)

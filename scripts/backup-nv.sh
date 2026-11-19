@@ -26,11 +26,14 @@ for p in "${parts[@]}"; do
     [ -n "$info" ] || { echo "$p: not found on the phone" >&2; exit 1; }
     read -r dev bytes sum <<< "$info"
 
-    # setsid + a short sleep before the telnet shell exits: otherwise the
-    # listener dies with the session or never starts (first tries: 1 KiB,
-    # then nothing).
-    scripts/initrd-sh.py "setsid nc -l -p $PORT < /dev/$dev >/dev/null 2>&1 & sleep 1" >/dev/null
+    # The phone-side listener runs in the foreground of a telnet session that
+    # stays open (in the background here) until the copy is done. Detaching it
+    # (setsid, &) was flaky: it died with the session after 1 KiB.
+    TIMEOUT=900 scripts/initrd-sh.py "nc -l -p $PORT < /dev/$dev >/dev/null 2>&1" >/dev/null 2>&1 &
+    lpid=$!
+    sleep 2
     nc "$PHONE" "$PORT" | head -c "$bytes" > "$OUT/$p.img" || true
+    wait "$lpid" || true
     got=$(shasum -a 256 "$OUT/$p.img" | cut -d' ' -f1)
     size=$(wc -c < "$OUT/$p.img" | tr -d ' ')
     if [ "$got" = "$sum" ] && [ "$size" = "$bytes" ]; then

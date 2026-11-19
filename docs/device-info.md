@@ -113,4 +113,8 @@ UFS LUNs: `sda` 121920 MiB (19 partitions, data), `sdb`/`sdc` 8 MiB (2 each, xbl
 
 Subsystems (`/sys/bus/msm_subsys`, after loading all 218 first-stage modules, no firmware): `modem`, `adsp`, `cdsp`, `npu`, `venus`, `a620_zap`, `ipa_fws`, all `OFFLINING` (registered, not booted).
 
+`super` (P2.6): LP metadata, 3 slots of 64 KiB, block 4096; Virtual A/B (`*-cow` partitions present). `vendor_b` (= `vendor_a`; the same extents in both metadata slots) is 2 extents: 698089472 bytes at 855638016 and 57917440 bytes at 4507828224 in `super` (sda18). Concatenated on the phone they hash to `24e7d45e…0f0d`, **identical to the factory `vendor.img`**, so the P1.9 firmware list is what the phone has. Busybox has no `dmsetup`; Ubuntu will map it with dm-linear (P4.1). Raw metadata: `firmware/inventory/super-meta.bin`.
+
+`modem_b` (sda13, vfat, mounts read-only on the stock kernel): `image/` 146 MB, 40 files: `modem.mdt` + `modem.b00`–`b34`, `modem_pr/` (tqftpserv), `modemr.jsn` (pd-mapper), `saipan/`, `version.cfg`; plus `verinfo/`.
+
 Init facts (Tests 1–11, `docs/log.md`): our ramdisk must be **LZ4 legacy**; `watchdog_v2` must load within ~100 s; module loading must honour `modules.softdep` (`qmi_helpers pre: qrtr`); `reboot bootloader` only lands in fastboot once the full module set (restart reason via `msm-poweroff`) is up.
