@@ -1,0 +1,17 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# The clock starts a month behind (no RTC sync; systemd's build-time floor).
+# timesyncd starts before any network and then backs off, so it can take a
+# long time to notice wifi. Kick it when a real uplink comes up.
+#
+# Only wlan0/usb0 (and connectivity changes): Docker's docker0/veth*/br-*
+# and lo also send "up", and 5+ restarts within 10 s hit timesyncd's start
+# limit, after which try-restart does nothing for the rest of the boot
+# (Pixel 2 test 53). reset-failed + restart also recovers from that state.
+case "$2" in
+    up) case "$1" in wlan0|usb0) ;; *) exit 0 ;; esac ;;
+    connectivity-change) ;;
+    *) exit 0 ;;
+esac
+systemctl reset-failed systemd-timesyncd.service 2>/dev/null
+systemctl restart systemd-timesyncd.service

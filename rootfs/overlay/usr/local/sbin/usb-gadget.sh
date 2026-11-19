@@ -1,0 +1,27 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# USB gadget: NCM network (macOS/Linux native) + ACM serial console.
+# Idempotent: the initramfs creates the same gadget; this keeps it if present.
+set -e
+G=/sys/kernel/config/usb_gadget/g1
+mountpoint -q /sys/kernel/config || mount -t configfs configfs /sys/kernel/config
+if [ -n "$(cat $G/UDC 2>/dev/null)" ]; then
+    echo "usb-gadget: already bound to $(cat $G/UDC)"; exit 0
+fi
+mkdir -p $G
+echo 0x18d1 > $G/idVendor     # Google
+echo 0xd001 > $G/idProduct
+mkdir -p $G/strings/0x409
+echo "Google"              > $G/strings/0x409/manufacturer
+echo "Pixel 5 (Ubuntu)"    > $G/strings/0x409/product
+echo "pixel5-ubuntu"       > $G/strings/0x409/serialnumber
+mkdir -p $G/functions/ncm.usb0 $G/functions/acm.GS0
+# Do NOT write ncm.usb0/dev_addr or host_addr here: in the Pixel 2's 4.4 kernel the
+# NCM net device only exists after bind (ncm_bind), so the write dereferences
+# NULL and panicked it (2026-11-17; untested on 4.19). After bind it returns EBUSY.
+mkdir -p $G/configs/c.1/strings/0x409
+echo "NCM + ACM" > $G/configs/c.1/strings/0x409/configuration
+[ -e $G/configs/c.1/ncm.usb0 ] || ln -s $G/functions/ncm.usb0 $G/configs/c.1/
+[ -e $G/configs/c.1/acm.GS0 ]  || ln -s $G/functions/acm.GS0  $G/configs/c.1/
+ls /sys/class/udc | head -n1 > $G/UDC
+echo "usb-gadget: bound to $(cat $G/UDC)"

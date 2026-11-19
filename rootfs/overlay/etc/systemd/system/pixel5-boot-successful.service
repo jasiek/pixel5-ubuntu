@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+# Tell the bootloader this A/B slot booted fine (what Android's update_verifier
+# does). Without it every boot counts the slot's retry counter down, and after
+# a few boots the bootloader refuses it: "slot unbootable: load error".
+# Runs once SSH is up, i.e. the phone is reachable and can be fixed remotely.
+[Unit]
+Description=Mark the current A/B boot slot successful
+After=ssh.service NetworkManager.service
+ConditionPathExists=/usr/local/sbin/qbootctl
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/qbootctl -m
+
+[Install]
+WantedBy=multi-user.target

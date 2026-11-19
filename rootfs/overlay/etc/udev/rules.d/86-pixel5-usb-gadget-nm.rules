@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+# NetworkManager's 85-nm-unmanaged.rules ignores USB gadget interfaces
+# (DEVTYPE=gadget). Our usb0 has a "shared" connection profile, so let NM
+# manage it.
+SUBSYSTEM=="net", ENV{DEVTYPE}=="gadget", ENV{NM_UNMANAGED}="0"
