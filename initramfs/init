@@ -15,7 +15,16 @@ export PATH=/bin
 mkdir -p /proc /sys /dev /tmp /run /newroot
 mount -t proc     proc     /proc
 mount -t sysfs    sysfs    /sys
-mount -t devtmpfs devtmpfs /dev
+# Google's stock 4.19 kernel has no DEVTMPFS (Android's ueventd makes the
+# nodes); fall back to a tmpfs /dev filled by busybox mdev. No hotplug
+# helper either (STATIC_USERMODEHELPER), so devnodes() rescans on demand.
+MDEV=""
+if ! mount -t devtmpfs devtmpfs /dev 2>/dev/null; then
+    mount -t tmpfs -o mode=0755 tmpfs /dev
+    MDEV=1
+fi
+devnodes() { [ -z "$MDEV" ] || mdev -s; }
+devnodes
 mkdir -p /dev/pts
 mount -t devpts   devpts   /dev/pts
 mount -t configfs configfs /sys/kernel/config
@@ -39,6 +48,7 @@ load_modules() {
     while read -r m; do
         insmod "/lib/modules/${m##*/}" 2>/dev/null || echo "$m" >> /tmp/mods.failed
     done < /tmp/mods.retry
+    devnodes
     log "modules: $(wc -l < /lib/modules/modules.load) listed, $(wc -l < /tmp/mods.failed) failed (/tmp/mods.failed)"
 }
 load_modules
@@ -60,7 +70,8 @@ setup_usb() {
     echo "pixel5-ubuntu"    > $G/strings/0x409/serialnumber
     echo "NCM + ACM"        > $G/configs/c.1/strings/0x409/configuration
     ln -s $G/functions/ncm.usb0 $G/configs/c.1/
-    ln -s $G/functions/acm.GS0  $G/configs/c.1/
+    # The stock kernel has no ACM function: network only, then.
+    [ -d $G/functions/acm.GS0 ] && ln -s $G/functions/acm.GS0 $G/configs/c.1/
     for i in $(seq 1 150); do          # dwc3 may probe late after module load
         udc=$(ls /sys/class/udc 2>/dev/null | head -n1)
         [ -n "$udc" ] && break
@@ -87,6 +98,7 @@ getty_loop=$!
 # ---- debug shell ------------------------------------------------------------
 debug_shell() {
     log "entering debug mode: $*"
+    devnodes
     ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up
     cat > /tmp/udhcpd.conf <<EOF
 start 172.16.42.2
@@ -123,6 +135,7 @@ find_userdata() {
 
 root=""
 for i in $(seq 1 150); do          # UFS can take a few seconds to probe
+    devnodes
     root=$(find_userdata) && break
     sleep 0.2
 done

@@ -28,3 +28,7 @@ Dated notes. Every phone test gets a number (`Test 1: ...`): what was run, what 
   | external/lpunpack | unix3dgforce/lpunpack | c59b8f3b | LGPL-3.0 |
 
   GitHub reports the kernel's license as NOASSERTION; its `COPYING` is GPL-2.0. The shallow kernel checkout is 1.1 GB.
+- P1.5/P1.8/P1.9 offline from the factory zip (owner downloaded it; SHA-256 matches the page): facts in `docs/device-info.md`.
+  - Both boot images are header v3. The vendor_boot DTB is a generic Lito base; the retail board comes from dtbo entry 25 (`v2 Redfin PVT`, board-id `0xb1e05`).
+  - Vendor ramdisk = recovery + 218 first-stage modules (UFS, USB). NCM is built into the stock kernel; ACM is not.
+  - P3.1 answered: the stock kernel can't run systemd (no DEVTMPFS, FHANDLE, AUTOFS). Initramfs now falls back to a tmpfs /dev filled by `mdev -s`, and ACM is optional, so the Phase 2 stock-kernel debug shell can still work (telnet over NCM only).

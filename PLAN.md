@@ -56,13 +56,13 @@ Background: `docs/research.md` (summary) and `docs/research/*.md` (full agent re
   - Gate: OEM unlocking is not greyed out (Verizon units can't be unlocked).
 - [ ] **P1.4** `adb reboot bootloader`, `fastboot flashing unlock` (confirm on phone), `fastboot getvar unlocked`.
   - Gate: `unlocked: yes`.
-- [ ] **P1.5** Download the final factory image (`UP1A.231105.001.B2`, Android 14) from developers.google.com/android/images#redfin into `firmware/`; record its SHA-256 from the page. If the phone is on an older build, run its `flash-all.sh`.
+- [x] **P1.5** _Zip downloaded by the owner 2026-11-19; SHA-256 `4e5a2679…` pinned in get-firmware.sh and matches. Phone build still to check in P1.2._ Download the final factory image (`UP1A.231105.001.B2`, Android 14) from developers.google.com/android/images#redfin into `firmware/`; record its SHA-256 from the page. If the phone is on an older build, run its `flash-all.sh`.
   - Gate: phone boots Android 14 with the matching build number.
 - [ ] **P1.6** **Last chance with Android running**, inventory over `adb shell` (non-root; record what is readable): `ls -lR /vendor/firmware /vendor/firmware_mnt/image /vendor/etc/sensors`, `ls -l /dev/block/by-name`, `getprop | grep -E 'ro.boot|ro.product|ro.hardware'` (drop `serialno`), `zcat /proc/config.gz` if readable → `docs/device-info.md` / `firmware/` (gitignored).
   - Why: the mainline report could not confirm firmware file names; this answers it in 5 minutes.
 - [ ] **P1.7** `fastboot getvar all 2>&1 | tee firmware/getvar-all.txt`. Note slot, sizes of boot, vendor_boot, dtbo, super, userdata, modem. Strip the serial before committing anything.
-- [ ] **P1.8** From the factory zip extract `boot.img`, `vendor_boot.img`, `dtbo.img`, `vbmeta.img`, `super` (via `lpunpack` → `vendor.img`) into `firmware/`.
-- [ ] **P1.9** `unpack_bootimg` both boot images → `docs/device-info.md`: header versions, cmdline (boot + vendor_boot), kernel/ramdisk offsets, page size, vendor ramdisk contents (is there an `/init`? which `.ko` + `modules.load`?), DTB `msm-id` / `board-id`.
+- [x] **P1.8** _Done 2026-11-19 by `get-firmware.sh`; vendor.img is its own file in the zip (no lpunpack needed)._ From the factory zip extract `boot.img`, `vendor_boot.img`, `dtbo.img`, `vbmeta.img`, `super` (via `lpunpack` → `vendor.img`) into `firmware/`.
+- [x] **P1.9** _Done 2026-11-19: `docs/device-info.md` (v3 both; base DTB generic, board picked from dtbo entry 25 `0xb1e05`; vendor ramdisk = recovery + 218 first-stage modules; stock kernel lacks DEVTMPFS/FHANDLE/AUTOFS/ACM)._ `unpack_bootimg` both boot images → `docs/device-info.md`: header versions, cmdline (boot + vendor_boot), kernel/ramdisk offsets, page size, vendor ramdisk contents (is there an `/init`? which `.ko` + `modules.load`?), DTB `msm-id` / `board-id`.
 - [ ] **P1.10** `fastboot boot firmware/boot.img`.
   - Gate: Android boots. Proves tethered boots work. If refused, retry with an AVB hash footer (`avbtool add_hash_footer --partition_size 100663296`) and log which one worked.
 
@@ -79,7 +79,7 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
   - Gate: firmware lists match P1.6.
 
 ## Phase 3: Ubuntu on the downstream kernel (1–3 days)
-- [ ] **P3.1** Can Ubuntu run on the **stock** kernel? Check its config (P1.6/P2) for systemd needs: `DEVTMPFS`, `FHANDLE`, `CGROUPS`, `AUTOFS_FS`, namespaces, `SECCOMP`, `TMPFS_XATTR`. All present → skip P3.2 for milestone 1 and log it.
+- [x] **P3.1** _Answered offline 2026-11-19: **no** (stock config has no DEVTMPFS, FHANDLE, AUTOFS; static usermode helper on). P3.2 is required._ Can Ubuntu run on the **stock** kernel? Check its config (P1.6/P2) for systemd needs: `DEVTMPFS`, `FHANDLE`, `CGROUPS`, `AUTOFS_FS`, namespaces, `SECCOMP`, `TMPFS_XATTR`. All present → skip P3.2 for milestone 1 and log it.
 - [ ] **P3.2** `scripts/build-kernel.sh`: LineageOS 4.19 `redbull_defconfig` + `kernel/redfin-ubuntu.config` (systemd options above; static usermode helper off; firmware user-helper fallback off; USB `CONFIGFS_NCM`). Build first-stage drivers in (`=y`) where possible; ship the rest in our initramfs, since vendor ramdisk modules won't match our vermagic.
   - Gate: compiles; `fastboot boot` reaches the P2 debug shell with our modules.
 - [ ] **P3.3** _Prepared 2026-11-19: builds (65 s), 4 GiB → 242 MB sparse; label `ubuntu`, no `orphan_file`/`metadata_csum_seed` (4.19 can't mount them rw), units enabled, keys + qbootctl in. Kernel modules get added once build-kernel.sh has run._ `scripts/build-rootfs.sh` (adapted): ext4 label **`ubuntu`** (the initramfs refuses anything else), ubuntu-base 24.04, hostname `pixel5`, user `ubuntu` + SSH keys, NetworkManager, avahi, USB gadget unit, kernel modules → ext4 `build/rootfs.img` → `img2simg`.

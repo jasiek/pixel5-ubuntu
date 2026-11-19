@@ -8,7 +8,6 @@
 # page, so this script does not fetch it):
 #   https://developers.google.com/android/images#redfin
 #   -> redfin-up1a.231105.001.b2-factory-<sha8>.zip into firmware/
-# Optional: FACTORY_SHA256=<full hash from the page> for a full check.
 #
 # - firmware/<build>/        flash-all.sh, bootloader, radio, image zip (restore)
 # - firmware/{boot,vendor_boot,dtbo,vbmeta}.img   for boot images and flashing
@@ -19,6 +18,8 @@ cd "$(dirname "$0")/.."
 
 # Final redfin release (Android 14, Feb 2024), see docs/research/bootchain.md.
 BUILD=redfin-up1a.231105.001.b2
+# Full SHA-256 from Google's page (copied by the owner, 2026-11-19).
+FACTORY_SHA256=4e5a26793d8400f13b72cbd17aeb284e040b3236436f0c6f3119ccc77d4495ad
 WANT="boot.img vendor_boot.img dtbo.img vbmeta.img"
 
 have_all() { for f in $WANT; do [ -f "firmware/$f" ] || return 1; done; [ -f "firmware/$BUILD/flash-all.sh" ]; }
@@ -43,7 +44,7 @@ if [ "${got:0:8}" != "$sha8" ]; then
     echo "ERROR: SHA-256 $got does not start with $sha8 (from the file name)." >&2
     exit 1
 fi
-if [ -n "${FACTORY_SHA256:-}" ] && [ "$got" != "$FACTORY_SHA256" ]; then
+if [ "$got" != "$FACTORY_SHA256" ]; then
     echo "ERROR: SHA-256 mismatch: got $got, expected $FACTORY_SHA256." >&2
     exit 1
 fi
