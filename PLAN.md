@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P6.4: modem (nairo 0052–0056, 0058, 0069; 0058 needs the GPU DT patches 0033–0037 underneath, or our own nodes), rmtfs address from downstream (`/sys/class/uio/uio*/maps/map0/addr`), then wifi.
+## ▶ RESUME HERE: P6.4: modem (nairo 0052–0056, 0058, 0069; 0058 needs the GPU DT patches 0033–0037 underneath, or our own nodes), rmtfs_mem at 0xf9900000 size 0x280000 (log: modem prep), then wifi.
 
 ---
 
