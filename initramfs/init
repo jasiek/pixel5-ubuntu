@@ -24,6 +24,25 @@ mount -t tmpfs    tmpfs    /tmp
 log() { echo "initramfs: $*" > /dev/kmsg; echo "initramfs: $*" >> /tmp/init.log; }
 log "started, kernel $(uname -r)"
 
+# ---- kernel modules -------------------------------------------------------
+# On redfin UFS, USB, clocks and pinctrl are modules. With the stock kernel
+# they come from the flashed vendor_boot's ramdisk (/lib/modules, merged
+# with ours by the bootloader); our own kernels ship theirs in the same place.
+# modules.load gives the order; a second pass catches order slips.
+load_modules() {
+    [ -f /lib/modules/modules.load ] || { log "no /lib/modules/modules.load"; return 0; }
+    : > /tmp/mods.retry
+    while read -r m; do
+        insmod "/lib/modules/${m##*/}" 2>/dev/null || echo "$m" >> /tmp/mods.retry
+    done < /lib/modules/modules.load
+    : > /tmp/mods.failed
+    while read -r m; do
+        insmod "/lib/modules/${m##*/}" 2>/dev/null || echo "$m" >> /tmp/mods.failed
+    done < /tmp/mods.retry
+    log "modules: $(wc -l < /lib/modules/modules.load) listed, $(wc -l < /tmp/mods.failed) failed (/tmp/mods.failed)"
+}
+load_modules
+
 # ---- USB gadget: NCM network + ACM serial ---------------------------------
 G=/sys/kernel/config/usb_gadget/g1
 setup_usb() {
@@ -42,7 +61,7 @@ setup_usb() {
     echo "NCM + ACM"        > $G/configs/c.1/strings/0x409/configuration
     ln -s $G/functions/ncm.usb0 $G/configs/c.1/
     ln -s $G/functions/acm.GS0  $G/configs/c.1/
-    for i in $(seq 1 50); do
+    for i in $(seq 1 150); do          # dwc3 may probe late after module load
         udc=$(ls /sys/class/udc 2>/dev/null | head -n1)
         [ -n "$udc" ] && break
         sleep 0.1
@@ -109,6 +128,9 @@ for i in $(seq 1 150); do          # UFS can take a few seconds to probe
 done
 [ -n "$root" ] || debug_shell "userdata partition not found"
 log "userdata is $root"
+# Never touch a userdata we didn't make (Android's data, a half-flashed
+# image): build-rootfs.sh labels our ext4 "ubuntu".
+blkid "$root" | grep -q 'LABEL="ubuntu"' || debug_shell "userdata has no ubuntu label; not mounting it"
 
 mount -t ext4 -o rw,noatime "$root" /newroot || debug_shell "mounting $root failed"
 [ -x /newroot/sbin/init ] || [ -L /newroot/sbin/init ] || debug_shell "/sbin/init missing in $root"
