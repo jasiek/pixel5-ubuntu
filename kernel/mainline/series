@@ -30,3 +30,5 @@ nairo 0060-LOCAL-pmdomain-qcom-rpmhpd-Keep-qphy.lvl-voted-on-SM.patch
 nairo 0061-phy-qcom-qmp-ufs-Use-the-downstream-reset-sequence-o.patch
 nairo 0073-scsi-ufs-qcom-Map-150-MHz-UniPro-to-HS-G3-on-SM7250.patch
 # optional (suspend only): nairo 0112-usb-dwc3-qcom-Reapply-UTMI-pipe-clk-on-resume.patch
+# Bring-up aid (ours, GPL-2.0-only like the kernel): pixel5.reset_at=N
+local 0001-LOCAL-arm64-pixel5.reset_at-N-boot-stage-reset-probe.patch

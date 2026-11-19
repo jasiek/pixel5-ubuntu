@@ -7,11 +7,12 @@
 #     Back in fastboot = the kernel reached userspace and PON reboot-mode
 #     works. Back in Ubuntu instead = panic (panic=10) or no reboot-mode:
 #     androidboot.bootreason tells which. No earlycon (no UART).
+# EXTRA="..." appends to the cmdline (e.g. EXTRA=pixel5.reset_at=3).
 # Needs scripts/build-mainline.sh first.
 set -euo pipefail
 
 if [ ! -f /.dockerenv ]; then
-    exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline-test.sh "$@"
+    DEV_DOCKER_ARGS="-e EXTRA -e PANIC" exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline-test.sh "$@"
 fi
 TEST=${1:?usage: build-mainline-test.sh t1}
 OUT=/work/build/mainline/out
@@ -39,7 +40,7 @@ case "$TEST" in
 t1)
     gcc -static -Os -s -o "$R/reboot-bootloader" /work/initramfs/reboot-bootloader.c
     mknod -m 600 "$R/dev/console" c 5 1
-    CMD="rdinit=/reboot-bootloader panic=${PANIC:--1} clk_ignore_unused pd_ignore_unused"
+    CMD="rdinit=/reboot-bootloader panic=${PANIC:--1} clk_ignore_unused pd_ignore_unused${EXTRA:+ $EXTRA}"
     ;;
 *) echo "unknown test $TEST" >&2; exit 2 ;;
 esac

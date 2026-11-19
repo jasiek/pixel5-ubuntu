@@ -1,0 +1,126 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Thu, 19 Nov 2026 15:18:15 +0000
+Subject: [PATCH] LOCAL: arm64: pixel5.reset_at=N boot-stage reset probe
+
+Bring-up aid for the Pixel 5, which has no UART and keeps no pstore over
+a reset: reset via PSCI SYSTEM_RESET when the boot reaches stage N, so the
+next boot reason shows how far the kernel got. Not for upstream.
+
+Signed-off-by: pixel5 <pixel5@localhost>
+---
+ arch/arm64/kernel/setup.c | 29 +++++++++++++++++++++++++++++
+ init/main.c               |  7 +++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
+index a707deba6..38dbd1ab6 100644
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -54,6 +54,8 @@
+ #include <asm/efi.h>
+ #include <asm/xen/hypervisor.h>
+ #include <asm/mmu_context.h>
++#include <linux/arm-smccc.h>
++#include <uapi/linux/psci.h>
+ 
+ static int num_standard_resources;
+ static struct resource *standard_resources;
+@@ -278,6 +280,31 @@ u64 cpu_logical_map(unsigned int cpu)
+ 	return __cpu_logical_map[cpu];
+ }
+ 
++/*
++ * Bring-up probe for boards without a UART or pstore (Pixel 5):
++ * pixel5.reset_at=N resets the board via PSCI SYSTEM_RESET when the boot
++ * reaches stage N. Reaching a stage shows up as a boot reason other than
++ * the watchdog's. 1: early params parsed, 2: end of setup_arch,
++ * 3: mm_core_init done, 4: rest_init, 5: before initcalls,
++ * 6: initcalls done, 7: about to run the initramfs init.
++ */
++static int pixel5_reset_at;
++
++static int __init pixel5_reset_at_setup(char *s)
++{
++	return kstrtoint(s, 0, &pixel5_reset_at);
++}
++early_param("pixel5.reset_at", pixel5_reset_at_setup);
++
++void pixel5_stage(int n)
++{
++	struct arm_smccc_res res;
++
++	if (pixel5_reset_at != n)
++		return;
++	arm_smccc_smc(PSCI_0_2_FN_SYSTEM_RESET, 0, 0, 0, 0, 0, 0, 0, &res);
++}
++
+ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ {
+ 	setup_initial_init_mm(_text, _etext, _edata, _end);
+@@ -297,6 +324,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	 */
+ 	jump_label_init();
+ 	parse_early_param();
++	pixel5_stage(1);
+ 
+ 	dynamic_scs_init();
+ 
+@@ -373,6 +401,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 			"This indicates a broken bootloader or old kernel\n",
+ 			boot_args[1], boot_args[2], boot_args[3]);
+ 	}
++	pixel5_stage(2);
+ }
+ 
+ static inline bool cpu_can_disable(unsigned int cpu)
+diff --git a/init/main.c b/init/main.c
+index d7bf1ffc5..c11c414d7 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -34,6 +34,8 @@
+ #include <linux/nmi.h>
+ #include <linux/percpu.h>
+ #include <linux/kmod.h>
++
++void pixel5_stage(int n);
+ #include <linux/kprobes.h>
+ #include <linux/kmsan.h>
+ #include <linux/ksysfs.h>
+@@ -1104,6 +1106,7 @@ void start_kernel(void)
+ 	sort_main_extable();
+ 	trap_init();
+ 	mm_core_init();
++	pixel5_stage(3);
+ 	maple_tree_init();
+ 	poking_init();
+ 	ftrace_init();
+@@ -1244,6 +1247,7 @@ void start_kernel(void)
+ 	kcsan_init();
+ 
+ 	/* Do the rest non-__init'ed, we're now alive */
++	pixel5_stage(4);
+ 	rest_init();
+ 
+ 	/*
+@@ -1645,6 +1649,7 @@ static int __ref kernel_init(void *unused)
+ 	do_sysctl_args();
+ 
+ 	if (ramdisk_execute_command) {
++		pixel5_stage(7);
+ 		ret = run_init_process(ramdisk_execute_command);
+ 		if (!ret)
+ 			return 0;
+@@ -1729,7 +1734,9 @@ static noinline void __init kernel_init_freeable(void)
+ 	padata_init();
+ 	page_alloc_init_late();
+ 
++	pixel5_stage(5);
+ 	do_basic_setup();
++	pixel5_stage(6);
+ 
+ 	kunit_run_all_tests();
+ 
+-- 
+2.43.0
+
