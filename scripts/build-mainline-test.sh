@@ -8,11 +8,12 @@
 #     works. Back in Ubuntu instead = panic (panic=10) or no reboot-mode:
 #     androidboot.bootreason tells which. No earlycon (no UART).
 # EXTRA="..." appends to the cmdline (e.g. EXTRA=pixel5.reset_at=3).
+# DTB=build/... uses another DTB (e.g. one with nodes disabled by fdtput).
 # Needs scripts/build-mainline.sh first.
 set -euo pipefail
 
 if [ ! -f /.dockerenv ]; then
-    DEV_DOCKER_ARGS="-e EXTRA -e PANIC" exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline-test.sh "$@"
+    DEV_DOCKER_ARGS="-e EXTRA -e PANIC -e DTB" exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline-test.sh "$@"
 fi
 TEST=${1:?usage: build-mainline-test.sh t1}
 OUT=/work/build/mainline/out
@@ -49,5 +50,5 @@ rm -rf "$R"
 
 VENDOR_CMDLINE=0 /work/scripts/make-bootimg-v2.sh \
     "${T#/work/}/Image.lz4" "${T#/work/}/initramfs.cpio.gz" \
-    build/mainline/out/arch/arm64/boot/dts/qcom/sm7250-google-redfin.dtb \
+    "${DTB:-build/mainline/out/arch/arm64/boot/dts/qcom/sm7250-google-redfin.dtb}" \
     "build/boot-mainline-$TEST.img" "$CMD"
