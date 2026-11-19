@@ -15,6 +15,9 @@ Type=oneshot
 RemainAfterExit=yes
 TimeoutStartSec=300
 ExecStart=/usr/local/sbin/pixel5-wifi-up
+# A clean shutdown is not a crash: clear the guard marker (a panic never
+# gets here). Without this, a reboot within 3 min disabled wifi.
+ExecStop=/bin/rm -f /var/lib/pixel5/wifi-pending
 
 [Install]
 WantedBy=multi-user.target

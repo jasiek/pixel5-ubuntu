@@ -100,7 +100,7 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
 - [x] **P5.2** _Done 2026-11-19 (owner OK), boot_b only (slot a is unbootable from the factory): `AVB_FOOTER=1` image; without the footer even `fastboot boot` failed (Load Error)._ (owner OK) `fastboot flash boot_a build/boot.img` and `boot_b`. vendor_boot stays stock on the downstream route.
 - [x] **P5.3** _Done 2026-11-19: qbootctl reports `_b` active + successful after boots from boot_b._ Mark the slot successful at boot (`qbootctl`; untested on redfin).
   - Gate: after 3 boots `fastboot getvar slot-successful:<slot>` is `yes`.
-- [ ] **P5.4** Power off, press power. Then 5 reboots.
+- [ ] **P5.4** _2026-11-19: 5 warm reboots → SSH over wifi in 45–48 s each (Test 23). Left: cold boot (owner presses power)._ Power off, press power. Then 5 reboots.
   - Gate: SSH over wifi within 60 s every time. 🎉 **Milestone 2: the phone boots into Linux.**
 - [ ] **P5.5** Headless tuning: panel off from boot (OLED burn-in), charge limit 70–80 %, `unattended-upgrades`. No notification LED on the Pixel 5: pick an alive signal (short vibration at boot, or a tiny dim pixel moving on the AMOLED). Owner decides.
 
