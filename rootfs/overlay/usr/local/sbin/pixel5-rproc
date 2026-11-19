@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Start or stop a remote processor on the mainline kernel by name.
+#   pixel5-rproc <name> start|stop       e.g. pixel5-rproc modem start
+# The remoteproc drivers are modules: wait up to 60 s for <name> to appear.
+set -eu
+name=$1 op=$2
+n=0
+while :; do
+    for r in /sys/class/remoteproc/remoteproc*; do
+        [ "$(cat "$r/name" 2>/dev/null)" = "$name" ] && break 2
+    done
+    n=$((n + 1))
+    [ $n -le 60 ] || { echo "no remoteproc called $name" >&2; exit 1; }
+    sleep 1
+done
+state=$(cat "$r/state")
+case "$op" in
+start) [ "$state" = running ] || echo start > "$r/state" ;;
+stop)  [ "$state" = offline ] || echo stop > "$r/state" ;;
+*)     echo "usage: $0 <name> start|stop" >&2; exit 2 ;;
+esac
+echo "$name (${r##*/}): $state -> $(cat "$r/state")"

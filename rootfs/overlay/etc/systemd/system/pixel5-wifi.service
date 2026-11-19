@@ -2,10 +2,13 @@
 # Wifi bring-up (P4.2): IPA firmware, wlan.ko, modem, then the board file.
 # NetworkManager takes wlan0 from there. See pixel5-wifi-up for the crash
 # guard (a boot that dies during bring-up disables wifi on the next ones).
+# Downstream kernel only (wlan.ko, /dev/ipa, /dev/subsys_modem): on
+# mainline, pixel5-modem-rproc starts the modem and ath10k_snoc follows.
 [Unit]
 Description=Bring up WLAN (modem, IPA, wlan.ko, board data)
 # Wants, not Requires: the daemons restart themselves (they can start before
 # qrtr-ns listens, Test 22), and a Requires= dependent is stopped with them.
+ConditionKernelVersion=<6
 Requires=pixel5-firmware.service
 Wants=qrtr-ns.service pd-mapper.service tqftpserv.service rmtfs.service
 After=pixel5-firmware.service qrtr-ns.service pd-mapper.service tqftpserv.service rmtfs.service

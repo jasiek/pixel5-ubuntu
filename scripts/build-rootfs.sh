@@ -25,6 +25,7 @@ if [ ! -f /.dockerenv ]; then
     cd "$REPO"
     [ -f build/qbootctl/qbootctl ] || scripts/build-qbootctl.sh
     [ -f build/qcom/pd-mapper ] && [ -f build/qcom/tqftpserv ] || scripts/build-qcom-daemons.sh
+    scripts/fetch-linux-firmware.sh
     mkdir -p build/ssh
     [ -f build/ssh/pixel5_ed25519 ] || ssh-keygen -q -t ed25519 -N "" -C pixel5-port-automation -f build/ssh/pixel5_ed25519
     # A host without ~/.ssh/*.pub is fine (the project key still goes in);
@@ -73,6 +74,10 @@ fi
 install -m 755 build/qbootctl/qbootctl "$R/usr/local/sbin/qbootctl"
 # Modem helpers built from external/ (scripts/build-qcom-daemons.sh).
 install -m 755 build/qcom/pd-mapper build/qcom/tqftpserv "$R/usr/local/sbin/"
+
+# linux-firmware files for the mainline kernel (scripts/fetch-linux-firmware.sh).
+(cd build/linux-firmware && find . -type f | while read -r f; do
+     install -D -m 644 "$f" "$R/usr/lib/firmware/$f"; done)
 
 # SSH access.
 install -d -m 700 -o 1000 -g 1000 "$R/home/ubuntu/.ssh"
