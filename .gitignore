@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+# Build outputs and proprietary firmware/backups: never committed.
+/build/
+/firmware/
+*.img
+*.simg
+*.zip
+.env
+*~
+.DS_Store
