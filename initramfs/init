@@ -224,7 +224,10 @@ done
 log "userdata is $root"
 # Never touch a userdata we didn't make (Android's data, a half-flashed
 # image): build-rootfs.sh labels our ext4 "ubuntu".
-blkid "$root" | grep -q 'LABEL="ubuntu"' || debug_shell "userdata has no ubuntu label; not mounting it"
+# (This busybox has no blkid: read the ext4 volume name, superblock offset
+# 1024 + 120, 16 bytes. Test 16: the blkid check always failed.)
+label=$(dd if="$root" bs=1 skip=1144 count=16 2>/dev/null | tr -d '\000')
+[ "$label" = ubuntu ] || debug_shell "userdata has no ubuntu label; not mounting it"
 
 mount -t ext4 -o rw,noatime "$root" /newroot || debug_shell "mounting $root failed"
 [ -x /newroot/sbin/init ] || [ -L /newroot/sbin/init ] || debug_shell "/sbin/init missing in $root"

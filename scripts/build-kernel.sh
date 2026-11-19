@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 # Build the downstream 4.19 kernel (LineageOS redbull) with our fragment.
 #   scripts/build-kernel.sh            -> build/kernel/arch/arm64/boot/Image.lz4
-# Out-of-tree build (O=build/kernel); the submodule stays clean.
+# Out-of-tree build (O=build/kernel). Our patches (kernel/patches/*.patch,
+# GPL-2.0-only) are applied to the submodule's work tree, which is
+# ignore=dirty in .gitmodules; applying is idempotent.
 set -euo pipefail
 
 if [ ! -f /.dockerenv ]; then
@@ -20,6 +22,16 @@ ARGS=(-C "$SRC" O="$OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang"
 if [ "$(uname -m)" != aarch64 ]; then
     ARGS+=(CROSS_COMPILE=aarch64-linux-gnu-)
 fi
+
+for p in /work/kernel/patches/*.patch; do
+    [ -e "$p" ] || continue
+    G=(git -c safe.directory='*' -C "$SRC")
+    if "${G[@]}" apply --reverse --check "$p" 2>/dev/null; then
+        continue                                  # already applied
+    fi
+    "${G[@]}" apply "$p"
+    echo "applied ${p##*/}"
+done
 
 make "${ARGS[@]}" redbull_defconfig
 # merge_config.sh writes sed temp files into the current directory; run it
