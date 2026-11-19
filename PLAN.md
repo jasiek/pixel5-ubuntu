@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P6.4 first item: mainline boots our Ubuntu rootfs from UFS (switch_root; modules not needed), then charger/fuel gauge.
+## ▶ RESUME HERE: P6.4: install mainline modules into the rootfs (dm-mod, qrtr), then charger (SMB5) + fuel gauge.
 
 ---
 
@@ -116,7 +116,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
   - Gate: mainline reaches our initramfs and USB serial works.
 - [x] **P6.3** _First gate done 2026-11-19: `kernel/mainline/dts/sm7250-google-redfin.dts` + generated dtbo sink (177 labels); all 36 overlays apply offline with 0 diff outside the sink (T0c). Grows per P6.4 item._ `kernel/mainline/dts/sm7250-google-redfin.dts` from the downstream DT (`lito-redfin*.dtsi`) and `firmware/live.dtb` (P2.5).
 - [ ] **P6.4** Bring-up, one change per test image, each `fastboot boot` or inactive slot only:
-  - [ ] UFS + USB2 gadget + rootfs (nairo patches; 32-bit DMA mask)
+  - [x] UFS + USB2 gadget + rootfs (nairo patches; 32-bit DMA mask) _Done 2026-11-19 (Tests 83–86): reads/writes verified, our Ubuntu boots on mainline, SSH over USB in 22 s. Mainline modules not yet in the rootfs._
   - [ ] Charger (SMB5) + fuel gauge (QGauge), cpufreq + thermal
   - [ ] Modem (MPSS PAS + Pixel SMEM socinfo quirk, tqftpserv `modem_pr/`, pd-mapper table) → wifi (ath10k_snoc, `board-2.bin` from vendor `bdwlan*`)
   - [ ] GPU A620 (simpledrm first, then msm + Mesa)

@@ -176,6 +176,10 @@ handover() {
     cp /tmp/init.log /newroot/run/initramfs.log 2>/dev/null
     umount /tmp
     umount /dev/pts
+    # pixel5.fallback=S (tests of a new kernel): back to fastboot after S
+    # seconds unless cancelled from the booted system (pkill reboot-bootloader).
+    f=$(sed -n 's/.*pixel5\.fallback=\([0-9]*\).*/\1/p' /proc/cmdline)
+    [ -n "$f" ] && { reboot-bootloader --after "$f" & log "fallback timer: fastboot in $f s"; }
     for m in /dev /proc /sys; do mount --move $m /newroot$m; done
     exec switch_root /newroot /sbin/init
 }
