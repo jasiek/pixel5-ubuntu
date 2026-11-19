@@ -43,7 +43,12 @@ if [ "$(cat "$SRC/.pixel5-stamp" 2>/dev/null)" != "$stamp" ]; then
     rm -rf "$SRC"
     "${G[@]}" -C "$BASE" worktree prune
     "${G[@]}" -C "$BASE" worktree add -q --detach "$SRC" "$pin"
+    # Fixed committer date: the same series gives the same commit hashes,
+    # so the kernel release (-g<hash>) and its module directory only change
+    # when the series does.
     export GIT_COMMITTER_NAME=pixel5 GIT_COMMITTER_EMAIL=pixel5@localhost
+    GIT_COMMITTER_DATE=$("${G[@]}" -C "$BASE" log -1 --format=%cI "$pin")
+    export GIT_COMMITTER_DATE
     for e in "${entries[@]}"; do
         p=$(patch_path $e)
         "${G[@]}" -C "$SRC" am -q --3way "$p" || {

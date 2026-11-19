@@ -37,6 +37,9 @@ nairo 0046-power-supply-Add-Qualcomm-QGauge-fuel-gauge-driver.patch
 nairo 0047-arm64-dts-qcom-pm7250b-Add-the-QGauge-fuel-gauge.patch
 nairo 0050-power-supply-qcom_smbx-Honour-the-Type-C-current-adv.patch
 nairo 0116-power-supply-qcom_qg-Count-charge-across-sleep.patch
+# P6.4 thermal: binding only; the TSENS nodes and zones are in our board
+# DTS (nairo's 0077 is written on top of its modem and GPU patches)
+nairo 0074-dt-bindings-thermal-qcom-tsens-Add-SM7250.patch
 # optional (suspend only): nairo 0112-usb-dwc3-qcom-Reapply-UTMI-pipe-clk-on-resume.patch
 # Bring-up aid (ours, GPL-2.0-only like the kernel): pixel5.reset_at=N
 local 0001-LOCAL-arm64-pixel5.reset_at-N-boot-stage-probe.patch
