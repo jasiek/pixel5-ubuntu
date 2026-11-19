@@ -45,22 +45,39 @@ log "started, kernel $(uname -r)"
 echo 1 > /proc/sys/kernel/firmware_config/ignore_sysfs_fallback 2>/dev/null
 echo 1 > /sys/class/firmware/timeout 2>/dev/null
 
+# ---- module loader (modprobe-like) ---------------------------------------
+# Android's first-stage init uses libmodprobe: soft "pre:" dependencies
+# (modules.softdep), then hard ones (modules.dep), then the module. A plain
+# modules.load walk loaded qti_qmi_sensor (#155) before qrtr (#217) although
+# "softdep qmi_helpers pre: qrtr" says otherwise, and that stalled boot
+# (Tests 7-9). Module names treat "-" and "_" alike. Missing files are fine:
+# our own kernel may build things in.
+M=/lib/modules
+mkdir -p /tmp/mods.done
+: > /tmp/mods.failed
+tr - _ < $M/modules.softdep > /tmp/mods.softdep 2>/dev/null
+for f in $M/*.ko; do f=${f##*/}; echo "$(echo "${f%.ko}" | tr - _) $f"; done > /tmp/mods.map
+load_one() {   # $1 = module name or file name (recursive: keep vars local)
+    local n f p d rev
+    n=$(echo "${1%.ko}" | tr - _)
+    [ -e /tmp/mods.done/$n ] && return 0
+    touch /tmp/mods.done/$n               # mark first: no loops on cycles
+    f=$(sed -n "s/^$n //p" /tmp/mods.map)
+    [ -n "$f" ] || return 0               # not a module here
+    for p in $(sed -n "s/^softdep $n pre: //p" /tmp/mods.softdep); do load_one "$p"; done
+    rev=""
+    for d in $(sed -n "s|^$M/$f:||p" $M/modules.dep); do rev="${d##*/} $rev"; done
+    for d in $rev; do load_one "$d"; done
+    insmod "$M/$f" 2>/dev/null || echo "$f" >> /tmp/mods.failed
+}
+
 # ---- early modules: watchdog + restart driver -----------------------------
 # The bootloader leaves the Qualcomm hardware watchdog running; Android loads
 # watchdog_v2.ko within 0.5 s to feed it. Without it the phone cold-resets
-# after ~100 s (Tests 2b-4: boot reason "watchdog"). msm-poweroff.ko is what
-# makes `reboot bootloader` land in fastboot (it writes the restart reason).
-# Dependencies come from modules.dep (loaded last-listed first, as modprobe
-# does). Missing modules are fine: our own kernel may build these in.
-load_mod() {
-    deps=$(sed -n "s|^/lib/modules/$1\.ko:||p" /lib/modules/modules.dep 2>/dev/null)
-    rev=""
-    for d in $deps; do rev="$d $rev"; done
-    for d in $rev; do insmod "$d" 2>/dev/null; done
-    insmod "/lib/modules/$1.ko" 2>/dev/null
-}
+# after ~100 s (Tests 2b-4: boot reason "watchdog"). msm-poweroff.ko is meant
+# to make `reboot bootloader` land in fastboot (it writes the restart reason).
 for m in watchdog_v2 spmi-pmic-arb qcom-spmi-pmic qpnp-power-on msm-poweroff; do
-    load_mod "$m"
+    load_one "$m"
 done
 log "early modules: $(grep -c -E '^(watchdog_v2|msm_poweroff|qpnp_power_on) ' /proc/modules) of 3 key ones loaded"
 
@@ -83,22 +100,15 @@ stage 0
 # On redfin UFS, USB, clocks and pinctrl are modules. With the stock kernel
 # they come from the flashed vendor_boot's ramdisk (/lib/modules, merged
 # with ours by the bootloader); our own kernels ship theirs in the same place.
-# modules.load gives the order; a second pass catches order slips.
+# modules.load gives the order; load_one() pulls in dependencies first.
 load_modules() {
-    [ -f /lib/modules/modules.load ] || { log "no /lib/modules/modules.load"; return 0; }
+    [ -f $M/modules.load ] || { log "no $M/modules.load"; return 0; }
     # initmods=N (bisecting a stall): load only the first N modules.
     n=$(sed -n 's/.*initmods=\([0-9]*\).*/\1/p' /proc/cmdline)
-    head -n "${n:-100000}" /lib/modules/modules.load > /tmp/mods.list
-    : > /tmp/mods.retry
-    while read -r m; do
-        insmod "/lib/modules/${m##*/}" 2>/dev/null || echo "$m" >> /tmp/mods.retry
-    done < /tmp/mods.list
-    : > /tmp/mods.failed
-    while read -r m; do
-        insmod "/lib/modules/${m##*/}" 2>/dev/null || echo "$m" >> /tmp/mods.failed
-    done < /tmp/mods.retry
+    head -n "${n:-100000}" $M/modules.load > /tmp/mods.list
+    while read -r m; do load_one "${m##*/}"; done < /tmp/mods.list
     devnodes
-    log "modules: $(wc -l < /lib/modules/modules.load) listed, $(wc -l < /tmp/mods.failed) failed (/tmp/mods.failed)"
+    log "modules: $(wc -l < /tmp/mods.list) listed, $(wc -l < /tmp/mods.failed) failed (/tmp/mods.failed)"
 }
 load_modules
 stage 2
