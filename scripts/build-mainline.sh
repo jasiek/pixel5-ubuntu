@@ -70,6 +70,10 @@ done < "$FRAG"
 
 DTS=arch/arm64/boot/dts/qcom
 cp /work/kernel/mainline/dts/*.dts* "$SRC/$DTS/"
+# Battery OCV tables come from the phone's own DT (vendor data: generated
+# here, never committed). firmware/live.dts is made in P1 (see docs/log.md).
+[ -f /work/firmware/live.dts ] || { echo "firmware/live.dts missing (battery OCV tables)" >&2; exit 1; }
+python3 -I /work/scripts/gen-battery-ocv.py /work/firmware/live.dts > "$SRC/$DTS/sm7250-google-redfin-battery-ocv.dtsi"
 make "${ARGS[@]}" -j"$(nproc)" Image qcom/sm7250-google-redfin.dtb "$@"
 # MODULES=1: also build the modules and install them (stripped) to
 # build/mainline/out/modules-install/lib/modules/<release>.

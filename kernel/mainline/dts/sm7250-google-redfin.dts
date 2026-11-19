@@ -17,6 +17,11 @@
 #include "sm7250.dtsi"
 #include "pm8150.dtsi"
 #include "pm8150l.dtsi"
+
+/* Live DT: qcom,pm7250b@2 and @3 on the SPMI bus */
+#define PM7250B_SID 2
+#define PM7250B_SID1 3
+#include "pm7250b.dtsi"
 #include "sm7250-google-redfin-dtbo-sink.dtsi"
 
 / {
@@ -32,6 +37,21 @@
 	chassis-type = "handset";
 	qcom,msm-id = <QCOM_ID_SM7250 0x10000>, <440 0x10000>;
 	qcom,board-id = <0 0>;
+
+	/*
+	 * Design capacity (downstream charge_full_design) and the cell's OCV
+	 * tables, which qcom_qg needs. No voltage or current: qcom_smbx then
+	 * keeps the float voltage the bootloader set (4.45 V downstream).
+	 */
+	battery: battery {
+		compatible = "simple-battery";
+		charge-full-design-microamp-hours = <4169000>;
+		/*
+		 * Generated at build time from firmware/live.dts by
+		 * scripts/gen-battery-ocv.py (vendor data, not in git).
+		 */
+#include "sm7250-google-redfin-battery-ocv.dtsi"
+	};
 
 	/* The bootloader fills in bootargs, initrd, kaslr-seed (and cdt). */
 	chosen {
@@ -179,6 +199,21 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 	};
+};
+
+/*
+ * SMB5 charger. Without constant-charge-current-max-microamp the driver
+ * programs a 1.5 A fast-charge current (DCP_CURRENT_UA), below stock.
+ * The 80/70 limit uses its writable "status" (USBIN suspend).
+ */
+&pm7250b_charger {
+	monitored-battery = <&battery>;
+	status = "okay";
+};
+
+&pm7250b_qg {
+	monitored-battery = <&battery>;
+	status = "okay";
 };
 
 /* reboot("bootloader") -> PON reason 0x2 -> ABL stays in fastboot */

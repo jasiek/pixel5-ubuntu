@@ -1,0 +1,43 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Charge limit on the mainline kernel (qcom_smbx charger, qcom_qg fuel gauge).
+#   pixel5-charge-hold <stop> <start>   e.g. 80 70: run until killed
+#   pixel5-charge-hold off              USB input back on
+# Mainline has no charge-level control, but the charger's "status" property
+# is writable: 0 suspends the USB input (USBIN_SUSPEND), 1 resumes it.
+# At or above <stop> the input goes off and the phone runs on battery; at or
+# below <start> it comes back on. The unit's ExecStopPost runs "off", so a
+# crash leaves the phone charging (the default, under the float voltage the
+# bootloader set), never with the input cut and nobody watching SOC.
+set -eu
+chg=/sys/class/power_supply/pmi8998_charger
+bat=/sys/class/power_supply/qcom-qg
+
+if [ "${1:-}" = off ]; then
+    [ -w "$chg/status" ] && echo 1 > "$chg/status"
+    echo "charge hold: off (USB input on)"
+    exit 0
+fi
+stop=$1 start=$2
+
+# The drivers are modules: wait for them (2 min at most).
+n=0
+until [ -r "$bat/capacity" ] && [ -w "$chg/status" ]; do
+    n=$((n + 1))
+    [ $n -le 60 ] || { echo "charge hold: no charger or fuel gauge" >&2; exit 1; }
+    sleep 2
+done
+
+echo "charge hold: input off at ${stop} %, on at ${start} %"
+state=
+while :; do
+    cap=$(cat "$bat/capacity")
+    if [ "$cap" -ge "$stop" ] && [ "$state" != off ]; then
+        echo 0 > "$chg/status"; state=off
+        echo "capacity ${cap} %: USB input off"
+    elif [ "$cap" -le "$start" ] && [ "$state" != on ]; then
+        echo 1 > "$chg/status"; state=on
+        echo "capacity ${cap} %: USB input on"
+    fi
+    sleep 30
+done

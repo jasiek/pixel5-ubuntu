@@ -4,6 +4,7 @@
 # crash) turns the limit off, so a stale SOC can never keep the input cut.
 [Unit]
 Description=Battery state of charge (QGauge client) and charge limit
+ConditionKernelVersion=<6
 After=local-fs.target
 
 [Service]

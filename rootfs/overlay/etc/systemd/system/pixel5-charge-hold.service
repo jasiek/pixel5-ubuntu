@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+# 70-80 % charge limit on the mainline kernel (pixel5-qgauge.service does it
+# on the downstream 4.19 kernel). ExecStopPost (also run after a crash)
+# turns the USB input back on.
+[Unit]
+Description=Charge limit (mainline: qcom_smbx + qcom_qg)
+ConditionKernelVersion=>=6
+After=local-fs.target
+
+[Service]
+ExecStart=/usr/local/sbin/pixel5-charge-hold 80 70
+ExecStopPost=/usr/local/sbin/pixel5-charge-hold off
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
