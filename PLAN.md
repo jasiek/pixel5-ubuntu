@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P6.4: charger (SMB5) + fuel gauge (QGauge) on mainline (nairo 0016/0017/0027/0046/0047), with the 80/70 charge limit, before mainline stays booted on the charger.
+## ▶ RESUME HERE: P6.4: modem (nairo 0052–0056, 0058, 0069; 0058 needs the GPU DT patches 0033–0037 underneath, or our own nodes), rmtfs address from downstream (`/sys/class/uio/uio*/maps/map0/addr`), then wifi.
 
 ---
 
@@ -117,7 +117,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
 - [x] **P6.3** _First gate done 2026-11-19: `kernel/mainline/dts/sm7250-google-redfin.dts` + generated dtbo sink (177 labels); all 36 overlays apply offline with 0 diff outside the sink (T0c). Grows per P6.4 item._ `kernel/mainline/dts/sm7250-google-redfin.dts` from the downstream DT (`lito-redfin*.dtsi`) and `firmware/live.dtb` (P2.5).
 - [ ] **P6.4** Bring-up, one change per test image, each `fastboot boot` or inactive slot only:
   - [x] UFS + USB2 gadget + rootfs (nairo patches; 32-bit DMA mask) _Done 2026-11-19 (Tests 83–86): reads/writes verified, our Ubuntu boots on mainline, SSH over USB in 22 s. Mainline modules installed (Test 87): Ubuntu on mainline `running`, 0 failed units._
-  - [ ] Charger (SMB5) + fuel gauge (QGauge), cpufreq + thermal
+  - [x] Charger (SMB5) + fuel gauge (QGauge), cpufreq + thermal _Done 2026-11-19 (Tests 88–91): qcom_smbx + qcom_qg (OCV tables generated from the phone's DT at build time), 80/70 hold via USB input suspend (`pixel5-charge-hold`), one full cycle verified; cpufreq (schedutil, 3 policies); 27 TSENS zones with 110 °C shutdown._
   - [ ] Modem (MPSS PAS + Pixel SMEM socinfo quirk, tqftpserv `modem_pr/`, pd-mapper table) → wifi (ath10k_snoc, `board-2.bin` from vendor `bdwlan*`)
   - [ ] GPU A620 (simpledrm first, then msm + Mesa)
   - [ ] Panel S6E3HC2 DSC command mode: **new driver** from downstream DCS sequences
