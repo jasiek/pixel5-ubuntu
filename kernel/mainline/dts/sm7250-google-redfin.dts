@@ -10,9 +10,11 @@
 /dts-v1/;
 
 #include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/firmware/qcom,scm.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/mailbox/qcom-ipcc.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 #include "sm7250.dtsi"
 #include "pm8150.dtsi"
@@ -121,6 +123,21 @@
 		kregistry_mem: kregistry@c8000000 {
 			reg = <0x0 0xc8000000 0x0 0x10000>;
 			no-map;
+		};
+
+		/*
+		 * Modem EFS buffer for rmtfs. Downstream allocates it at run time
+		 * (live DT qcom,rmtfs_sharedmem: size only) and shares it with the
+		 * modem (hyp_assign to HLOS + MSS_MSA); on redfin it lands at
+		 * 0xf9900000 (downstream /sys/class/uio/uio0/maps/map0).
+		 */
+		rmtfs_mem: rmtfs@f9900000 {
+			compatible = "qcom,rmtfs-mem";
+			reg = <0x0 0xf9900000 0x0 0x280000>;
+			no-map;
+
+			qcom,client-id = <1>;
+			qcom,vmid = <QCOM_SCM_VMID_MSS_MSA>;
 		};
 	};
 };
@@ -486,6 +503,28 @@
 			};
 		};
 	};
+
+	/* Live DT qcom,smp2p-mpss: SMEM items 435/428, IPCC client MPSS signal 2 */
+	smp2p-mpss {
+		compatible = "qcom,smp2p";
+		qcom,smem = <435>, <428>;
+		interrupts-extended = <&ipcc IPCC_CLIENT_MPSS IPCC_MPROC_SIGNAL_SMP2P
+					     IRQ_TYPE_EDGE_RISING>;
+		mboxes = <&ipcc IPCC_CLIENT_MPSS IPCC_MPROC_SIGNAL_SMP2P>;
+		qcom,local-pid = <0>;
+		qcom,remote-pid = <1>;
+
+		modem_smp2p_out: master-kernel {
+			qcom,entry-name = "master-kernel";
+			#qcom,smem-state-cells = <1>;
+		};
+
+		modem_smp2p_in: slave-kernel {
+			qcom,entry-name = "slave-kernel";
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
+	};
 };
 
 /* Live DT: the redfin overlay grows the modem + WLAN region to 0x11800000. */
@@ -500,6 +539,68 @@
 		reg = <0x0 0x17c10000 0x0 0x1000>;
 		clocks = <&sleep_clk>;
 		interrupts = <GIC_SPI 0 IRQ_TYPE_EDGE_RISING>;
+	};
+
+	/* Live DT qcom,ipcc@408000 */
+	ipcc: mailbox@408000 {
+		compatible = "qcom,sm7250-ipcc", "qcom,ipcc";
+		reg = <0x0 0x00408000 0x0 0x1000>;
+		interrupts = <GIC_SPI 229 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-controller;
+		#interrupt-cells = <3>;
+		#mbox-cells = <2>;
+	};
+
+	/*
+	 * Live DT qcom,mss@4080000 (pil-tz-generic): PAS ID 4, wdog SPI 266,
+	 * smp2p bits 0-3 and 7, CX + MSS proxy votes, signals the AOP, the
+	 * modem + WLAN carve-out. auto_boot is off: userspace starts it.
+	 */
+	remoteproc_mpss: remoteproc@4080000 {
+		compatible = "qcom,sm7250-mpss-pas";
+		reg = <0x0 0x04080000 0x0 0x10000>;
+
+		interrupts-extended = <&intc GIC_SPI 266 IRQ_TYPE_EDGE_RISING>,
+				      <&modem_smp2p_in 0 IRQ_TYPE_EDGE_RISING>,
+				      <&modem_smp2p_in 1 IRQ_TYPE_EDGE_RISING>,
+				      <&modem_smp2p_in 2 IRQ_TYPE_EDGE_RISING>,
+				      <&modem_smp2p_in 3 IRQ_TYPE_EDGE_RISING>,
+				      <&modem_smp2p_in 7 IRQ_TYPE_EDGE_RISING>;
+		interrupt-names = "wdog", "fatal", "ready", "handover",
+				  "stop-ack", "shutdown-ack";
+
+		clocks = <&rpmhcc RPMH_CXO_CLK>;
+		clock-names = "xo";
+
+		power-domains = <&rpmhpd RPMHPD_CX>, <&rpmhpd RPMHPD_MSS>;
+		power-domain-names = "cx", "mss";
+
+		memory-region = <&modem_wlan_mem>;
+		firmware-name = "modem.mdt";	/* via firmware_class.path */
+
+		qcom,qmp = <&aoss_qmp>;
+
+		qcom,smem-states = <&modem_smp2p_out 0>;
+		qcom,smem-state-names = "stop";
+
+		glink-edge {
+			interrupts-extended = <&ipcc IPCC_CLIENT_MPSS
+						     IPCC_MPROC_SIGNAL_GLINK_QMP
+						     IRQ_TYPE_EDGE_RISING>;
+			mboxes = <&ipcc IPCC_CLIENT_MPSS IPCC_MPROC_SIGNAL_GLINK_QMP>;
+			label = "modem";
+			qcom,remote-pid = <1>;
+		};
+	};
+
+	/* Live DT qcom,qmp-aop@c300000: IPCC client AOP, signal 0 */
+	aoss_qmp: power-management@c300000 {
+		compatible = "qcom,sm7250-aoss-qmp", "qcom,aoss-qmp";
+		reg = <0x0 0x0c300000 0x0 0x1000>;
+		interrupts-extended = <&ipcc IPCC_CLIENT_AOP IPCC_MPROC_SIGNAL_GLINK_QMP
+					     IRQ_TYPE_EDGE_RISING>;
+		mboxes = <&ipcc IPCC_CLIENT_AOP IPCC_MPROC_SIGNAL_GLINK_QMP>;
+		#clock-cells = <0>;
 	};
 };
 

@@ -40,6 +40,13 @@ nairo 0116-power-supply-qcom_qg-Count-charge-across-sleep.patch
 # P6.4 thermal: binding only; the TSENS nodes and zones are in our board
 # DTS (nairo's 0077 is written on top of its modem and GPU patches)
 nairo 0074-dt-bindings-thermal-qcom-tsens-Add-SM7250.patch
+# P6.4 modem: bindings, the SM7250 MPSS PAS entry, the qrtr-ns announce fix;
+# the IPCC, AOSS QMP, smp2p, MPSS and rmtfs nodes are in our board DTS
+nairo 0052-dt-bindings-mailbox-qcom-ipcc-Add-SM7250.patch
+nairo 0053-dt-bindings-soc-qcom-aoss-qmp-Add-SM7250.patch
+nairo 0054-dt-bindings-remoteproc-qcom-sm6350-pas-Add-SM7250-MP.patch
+nairo 0055-remoteproc-qcom_q6v5_pas-Add-SM7250-MPSS.patch
+nairo 0069-net-qrtr-ns-Do-not-let-one-failed-announcement-hide-.patch
 # optional (suspend only): nairo 0112-usb-dwc3-qcom-Reapply-UTMI-pipe-clk-on-resume.patch
 # Bring-up aid (ours, GPL-2.0-only like the kernel): pixel5.reset_at=N
 local 0001-LOCAL-arm64-pixel5.reset_at-N-boot-stage-probe.patch
