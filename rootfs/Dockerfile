@@ -30,7 +30,7 @@ RUN chmod 600 /etc/NetworkManager/system-connections/*.nmconnection \
         serial-getty@ttyGS0.service pixel5-boot-successful.service \
         pixel5-firmware.service pd-mapper.service \
         rmtfs.service tqftpserv.service pixel5-wifi.service pixel5-wifi-ok.timer \
-        pixel5-qgauge.service \
+        pixel5-qgauge.service pixel5-alive.service \
     # Host keys are generated on first boot (ssh.service drop-in).
     && rm -f /etc/ssh/ssh_host_* \
     # Fresh machine-id on first boot.

@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P4.4 gate (SSH over wifi, cable unplugged), then P5.4 (cold boots + 5 reboots).
+## ▶ RESUME HERE: P6.3 (redfin board DTS), then P6.2 test T0b (docs/research/mainline-boot.md).
 
 ---
 
@@ -92,7 +92,7 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
 - [x] **P4.1** _Done 2026-11-19: `pixel5-dynparts` (LP metadata for the active slot → dm-linear, read-only) + `pixel5-firmware.service`: `/vendor` and `/vendor/firmware_mnt` (modem_b) mounted read-only at boot._ systemd units: vendor (dm-linear from super, P2.6) and `modem_a` mounted read-only where the kernel looks for firmware.
 - [x] **P4.2** _Done 2026-11-19 (Tests 19–22): qrtr-ns, pd-mapper + tqftpserv (ours), rmtfs (UIO), `/dev/ipa`, `wlan.ko`, modem held open, then our `pixel5-wlfw-bdf` (BDF + cal report) → FW ready → wlan0. All at boot via `pixel5-wifi.service` with a crash guard._ Gate: `wlan0` exists. WCN3990 needs the modem up first.
 - [x] **P4.3** _Done 2026-11-19: open-source daemons only, plus a 150-line Python WLFW client instead of cnss-daemon. No vendor daemons._ No `wlan0`? Try the open-source daemons first (`rmtfs`, `tqftpserv`, `pd-mapper`, `qrtr`; start order from the Pixel 2 mainline lesson: tqftpserv + diag before `rmtfs -s`). Then fall back to running vendor daemons (`cnss-daemon` etc.) directly, as the Pixel 2 did on 4.4 (its dropped `android-env` helpers).
-- [ ] **P4.4** _2026-11-19: MAC = factory (google_wlan_mac), no generation needed; NM profile baked in and autoconnects (HTTPS over wlan0). Left: the gate with the cable unplugged._ Stable MAC (generate once, persist), `nmcli dev wifi connect`, baked-in NM profile.
+- [x] **P4.4** _Done 2026-11-19: MAC = factory (google_wlan_mac); NM profile baked in; cable unplugged → `ssh ubuntu@pixel5.local` over wifi._ Stable MAC (generate once, persist), `nmcli dev wifi connect`, baked-in NM profile.
   - Gate: `ssh ubuntu@pixel5.local` with the cable unplugged.
 
 ## Phase 5: Make it permanent (1–2 h, ⚠️ flashes)
@@ -100,9 +100,9 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
 - [x] **P5.2** _Done 2026-11-19 (owner OK), boot_b only (slot a is unbootable from the factory): `AVB_FOOTER=1` image; without the footer even `fastboot boot` failed (Load Error)._ (owner OK) `fastboot flash boot_a build/boot.img` and `boot_b`. vendor_boot stays stock on the downstream route.
 - [x] **P5.3** _Done 2026-11-19: qbootctl reports `_b` active + successful after boots from boot_b._ Mark the slot successful at boot (`qbootctl`; untested on redfin).
   - Gate: after 3 boots `fastboot getvar slot-successful:<slot>` is `yes`.
-- [ ] **P5.4** _2026-11-19: 5 warm reboots → SSH over wifi in 45–48 s each (Test 23). Left: cold boot (owner presses power)._ Power off, press power. Then 5 reboots.
+- [x] **P5.4** _Done 2026-11-19: 5 warm reboots → SSH over wifi in 45–48 s (Test 23); cold boot → 31.5 s (Test 26). Milestone 2._ Power off, press power. Then 5 reboots.
   - Gate: SSH over wifi within 60 s every time. 🎉 **Milestone 2: the phone boots into Linux.**
-- [ ] **P5.5** _2026-11-19: panel undriven after the bootloader splash; SOC from our QGauge client (`pixel5-qgauge`, was frozen at 53 %); charge limit 70–80 % works (input cut above 80, Test 24); unattended-upgrades on. Left: alive signal (owner)._ Headless tuning: panel off from boot (OLED burn-in), charge limit 70–80 %, `unattended-upgrades`. No notification LED on the Pixel 5: pick an alive signal (short vibration at boot, or a tiny dim pixel moving on the AMOLED). Owner decides.
+- [x] **P5.5** _Done 2026-11-19: panel undriven after the bootloader splash; SOC from our QGauge client (`pixel5-qgauge`, was frozen at 53 %); charge limit 70–80 % works (input cut above 80, Test 24); unattended-upgrades on. Alive: 2 short buzzes when wifi is up, 1 long if not (`pixel5-alive`)._ Headless tuning: panel off from boot (OLED burn-in), charge limit 70–80 %, `unattended-upgrades`. No notification LED on the Pixel 5: pick an alive signal (short vibration at boot, or a tiny dim pixel moving on the AMOLED). Owner decides.
 
 ## Phase 6: Mainline kernel (weeks; research-heavy, mirrors Pixel 2 P8.3)
 Source: `docs/research/mainline.md`. No mainline kernel has ever been shown booting on redfin.
