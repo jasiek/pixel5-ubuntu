@@ -43,7 +43,9 @@ fi
 cd /work
 R=/tmp/rootfs          # container-internal FS: keeps ownership/modes exact
 rm -rf "$R"; mkdir -p "$R"
-tar -xpf build/rootfs.tar -C "$R" --numeric-owner
+# --xattrs: file capabilities live in security.capability (ping's
+# cap_net_raw is the only one in the image); plain -p drops them.
+tar --xattrs --xattrs-include='*' -xpf build/rootfs.tar -C "$R" --numeric-owner
 
 # Docker leftovers / files Docker managed at runtime.
 rm -f "$R/.dockerenv"
@@ -94,7 +96,7 @@ echo "built $(date -u +%FT%TZ) kernel $KREL" > "$R/etc/pixel5-build"
 
 # The same tree as a tar, for the tethered test from RAM (P3.3:
 # scripts/ramroot.sh unpacks it into a tmpfs on the phone; nothing flashed).
-tar -C "$R" --numeric-owner -cpf build/rootfs-final.tar .
+tar -C "$R" --numeric-owner --xattrs --xattrs-include='*' -cpf build/rootfs-final.tar .
 
 rm -f build/rootfs.img build/rootfs.simg
 # e2fsprogs 1.47 (Ubuntu 24.04) enables orphan_file and metadata_csum_seed by
