@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+[Unit]
+Description=Phone firmware partitions: vendor and modem, read-only (P4.1)
+DefaultDependencies=no
+After=local-fs.target systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+Before=sysinit.target
+ConditionPathExists=/dev/disk/by-partlabel/super
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/pixel5-firmware-mounts
+
+[Install]
+WantedBy=sysinit.target

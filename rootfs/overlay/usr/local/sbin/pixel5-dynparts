@@ -1,0 +1,92 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: MIT
+"""Map Android dynamic partitions out of `super` with dm-linear, read-only.
+
+    pixel5-dynparts list            # partitions of the active slot
+    pixel5-dynparts map vendor      # -> /dev/mapper/vendor (read-only)
+
+Reads the LP metadata (Android liblp format) for the active slot
+(androidboot.slot_suffix: _a = metadata slot 0, _b = 1) and creates one
+dm-linear device per partition with `dmsetup create --readonly`. Nothing is
+ever written to `super`.
+"""
+import struct
+import subprocess
+import sys
+
+SUPER = "/dev/disk/by-partlabel/super"
+GEOMETRY_MAGIC = 0x616C4467
+HEADER_MAGIC = 0x414C5030
+RESERVED = 4096          # LP_PARTITION_RESERVED_BYTES
+GEOMETRY_SIZE = 4096     # LP_METADATA_GEOMETRY_SIZE (primary + backup copies)
+TARGET_LINEAR, TARGET_ZERO = 0, 1
+
+
+def slot_suffix():
+    # Read one key only: /proc/cmdline also holds the serial number.
+    for tok in open("/proc/cmdline").read().split():
+        if tok.startswith("androidboot.slot_suffix="):
+            return tok.split("=", 1)[1]
+    sys.exit("no androidboot.slot_suffix on the kernel cmdline")
+
+
+def read_metadata(dev, slot_index):
+    with open(dev, "rb") as f:
+        f.seek(RESERVED)
+        geo = f.read(GEOMETRY_SIZE)
+        magic, = struct.unpack_from("<I", geo, 0)
+        if magic != GEOMETRY_MAGIC:
+            sys.exit(f"{dev}: no LP geometry (magic {magic:#x})")
+        metadata_max, slots, _block = struct.unpack_from("<III", geo, 8 + 32)
+        if slot_index >= slots:
+            sys.exit(f"metadata slot {slot_index} >= {slots}")
+        f.seek(RESERVED + 2 * GEOMETRY_SIZE + slot_index * metadata_max)
+        md = f.read(metadata_max)
+    magic, _major, _minor, header_size = struct.unpack_from("<IHHI", md, 0)
+    if magic != HEADER_MAGIC:
+        sys.exit(f"bad LP metadata header (magic {magic:#x})")
+    off = 12 + 32 + 4 + 32            # magic..header_checksum, tables_size, tables_checksum
+    (p_off, p_num, p_size), (e_off, e_num, e_size) = (
+        struct.unpack_from("<III", md, off), struct.unpack_from("<III", md, off + 12))
+    tables = md[header_size:]
+    extents = [struct.unpack_from("<QIQI", tables, e_off + i * e_size) for i in range(e_num)]
+    parts = {}
+    for i in range(p_num):
+        name, _attr, first, count, _group = struct.unpack_from("<36sIIII", tables, p_off + i * p_size)
+        parts[name.rstrip(b"\0").decode()] = extents[first:first + count]
+    return parts
+
+
+def table(dev, extents):
+    lines, start = [], 0
+    for sectors, ttype, target, source in extents:
+        if ttype == TARGET_LINEAR and source == 0:
+            lines.append(f"{start} {sectors} linear {dev} {target}")
+        elif ttype == TARGET_ZERO:
+            lines.append(f"{start} {sectors} zero")
+        else:
+            sys.exit(f"unsupported extent (type {ttype}, block device {source})")
+        start += sectors
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    suffix = slot_suffix()
+    parts = read_metadata(SUPER, {"_a": 0, "_b": 1}[suffix])
+    if len(sys.argv) == 2 and sys.argv[1] == "list":
+        for name, ext in parts.items():
+            print(name, sum(e[0] for e in ext) * 512, "bytes,", len(ext), "extents")
+        return
+    if len(sys.argv) < 3 or sys.argv[1] != "map":
+        sys.exit(__doc__)
+    dev = "/dev/" + subprocess.check_output(["readlink", "-f", SUPER], text=True).strip().split("/")[-1]
+    for base in sys.argv[2:]:
+        name = base + suffix
+        if name not in parts:
+            sys.exit(f"{name} not in super (slot {suffix})")
+        subprocess.run(["dmsetup", "create", "--readonly", base], input=table(dev, parts[name]),
+                       text=True, check=True)
+        print(f"/dev/mapper/{base} = {name} (read-only)")
+
+
+main()

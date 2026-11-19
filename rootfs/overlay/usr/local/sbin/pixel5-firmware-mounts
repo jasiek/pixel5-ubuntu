@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Mount the phone's firmware partitions read-only, where Android has them
+# (P4.1): vendor_<slot> from super (dm-linear) at /vendor, modem_<slot>
+# (vfat) at /vendor/firmware_mnt. Never writes to either.
+set -eu
+slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^androidboot.slot_suffix=//p')
+[ -n "$slot" ] || { echo "no slot suffix on the cmdline" >&2; exit 1; }
+[ -e /dev/mapper/vendor ] || /usr/local/sbin/pixel5-dynparts map vendor
+mkdir -p /vendor
+mountpoint -q /vendor || mount -t ext4 -o ro,noload /dev/mapper/vendor /vendor
+mountpoint -q /vendor/firmware_mnt || \
+    mount -t vfat -o ro,uid=0,gid=0,dmask=0022,fmask=0133,shortname=lower \
+        "/dev/disk/by-partlabel/modem$slot" /vendor/firmware_mnt
+echo "vendor$slot on /vendor, modem$slot on /vendor/firmware_mnt (read-only)"
