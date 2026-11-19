@@ -13,3 +13,4 @@ Dated notes. Every phone test gets a number (`Test 1: ...`): what was run, what 
 - D1: owner picked route A (plain Ubuntu 24.04, own kernels).
 - P0.2: generic tooling copied from the Pixel 2 repo and renamed (`pixel5-build` image, `PIXEL5_HOST`, gadget serial `pixel5-ubuntu`, `build/ssh/pixel5_ed25519`). One container instead of two: Ubuntu 24.04 + LLVM 18 + busybox-static, sparse and e2fs tools. `dev.sh uname -m` = aarch64 (image build 24 s); `build-initramfs.sh` → 1.2 MB cpio.
 - Found: this clone sits on the case-insensitive system volume. The Pixel 2 clone lives on `/Volumes/Pixel2Dev` (case-sensitive) for the kernel trees. Must move before P0.4.
+- Clone moved by the owner to `/Volumes/Pixel2Dev/pixel5-ubuntu` (case-sensitive, checked). P0.4 unblocked.
