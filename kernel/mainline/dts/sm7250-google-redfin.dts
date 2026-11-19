@@ -196,6 +196,16 @@
 	status = "okay";
 };
 
+&tlmm {
+	/*
+	 * GPIOs 0-3 are the QUP SE1 SPI bus (lito-pinctrl qupv3_se1_spi),
+	 * owned by TrustZone (fingerprint; disabled spi@884000 in the live
+	 * DT). Any access from Linux hangs the bus until the watchdog resets
+	 * the phone: each of the four alone does (Tests 66-81).
+	 */
+	gpio-reserved-ranges = <0 4>;
+};
+
 &ufs_mem_hc {
 	reset-gpios = <&tlmm 146 GPIO_ACTIVE_LOW>;	/* ufs_reset pad */
 	vcc-supply = <&vreg_l7c_2p96>;
