@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P1.4 (unlock; owner confirms, wipes the phone).
+## ▶ RESUME HERE: P2.5 (inventory from the debug shell; phone is in it now, telnet 172.16.42.1).
 
 ---
 
@@ -54,13 +54,13 @@ Background: `docs/research.md` (summary) and `docs/research/*.md` (full agent re
 - [x] **P1.2** _Done 2026-11-19 via getprop: GTT9Q, MP1.0, final build, slot _b; `docs/device-info.md`._ Settings → About phone: Android version, build number, storage, model → `docs/device-info.md`.
 - [x] **P1.3** _Done 2026-11-19: not greyed out (`sys.oem_unlock_allowed=1`)._ Tap *Build number* 7×, turn on **OEM unlocking** + **USB debugging**.
   - Gate: OEM unlocking is not greyed out (Verizon units can't be unlocked).
-- [ ] **P1.4** `adb reboot bootloader`, `fastboot flashing unlock` (confirm on phone), `fastboot getvar unlocked`.
+- [x] **P1.4** _Done 2026-11-19: unlocked by the owner._ `adb reboot bootloader`, `fastboot flashing unlock` (confirm on phone), `fastboot getvar unlocked`.
   - Gate: `unlocked: yes`.
 - [x] **P1.5** _Zip downloaded by the owner 2026-11-19; SHA-256 `4e5a2679…` pinned in get-firmware.sh and matches. Phone build still to check in P1.2._ Download the final factory image (`UP1A.231105.001.B2`, Android 14) from developers.google.com/android/images#redfin into `firmware/`; record its SHA-256 from the page. If the phone is on an older build, run its `flash-all.sh`.
   - Gate: phone boots Android 14 with the matching build number.
 - [x] **P1.6** _Done 2026-11-19: partition map, dtbo_idx 25, kernel, config → `docs/device-info.md`, raw in `firmware/inventory/`. `/vendor/firmware_mnt` (modem) not readable without root: listed in P2.6 instead._ **Last chance with Android running**, inventory over `adb shell` (non-root; record what is readable): `ls -lR /vendor/firmware /vendor/firmware_mnt/image /vendor/etc/sensors`, `ls -l /dev/block/by-name`, `getprop | grep -E 'ro.boot|ro.product|ro.hardware'` (drop `serialno`), `zcat /proc/config.gz` if readable → `docs/device-info.md` / `firmware/` (gitignored).
   - Why: the mainline report could not confirm firmware file names; this answers it in 5 minutes.
-- [ ] **P1.7** `fastboot getvar all 2>&1 | tee firmware/getvar-all.txt`. Note slot, sizes of boot, vendor_boot, dtbo, super, userdata, modem. Strip the serial before committing anything.
+- [x] **P1.7** _Done 2026-11-19: `firmware/getvar-all.txt` (serial removed); partition map in `docs/device-info.md`._ `fastboot getvar all 2>&1 | tee firmware/getvar-all.txt`. Note slot, sizes of boot, vendor_boot, dtbo, super, userdata, modem. Strip the serial before committing anything.
 - [x] **P1.8** _Done 2026-11-19 by `get-firmware.sh`; vendor.img is its own file in the zip (no lpunpack needed)._ From the factory zip extract `boot.img`, `vendor_boot.img`, `dtbo.img`, `vbmeta.img`, `super` (via `lpunpack` → `vendor.img`) into `firmware/`.
 - [x] **P1.9** _Done 2026-11-19: `docs/device-info.md` (v3 both; base DTB generic, board picked from dtbo entry 25 `0xb1e05`; vendor ramdisk = recovery + 218 first-stage modules; stock kernel lacks DEVTMPFS/FHANDLE/AUTOFS/ACM)._ `unpack_bootimg` both boot images → `docs/device-info.md`: header versions, cmdline (boot + vendor_boot), kernel/ramdisk offsets, page size, vendor ramdisk contents (is there an `/init`? which `.ko` + `modules.load`?), DTB `msm-id` / `board-id`.
 - [ ] **P1.10** `fastboot boot firmware/boot.img`.
@@ -68,11 +68,11 @@ Background: `docs/research.md` (summary) and `docs/research/*.md` (full agent re
 
 ## Phase 2: Debug shell on the stock kernel (2–4 h, nothing flashed)
 Why first: the stock kernel matches the stock vendor_boot modules, so UFS and USB load with zero kernel work. We get a Linux shell before building anything, and use it for backups.
-- [ ] **P2.1** _Prepared 2026-11-19 (untested on the phone): modules.load in two passes, 15 s UDC wait, userdata mounted only with ext4 label `ubuntu`._ `scripts/build-initramfs.sh` (adapted): busybox `/init` that `insmod`s from the vendor ramdisk's `/lib/modules` in `modules.load` order, starts a configfs NCM/ECM gadget at `172.16.42.1`, runs `telnetd`, never mounts userdata read-write, and returns to fastboot after 10 min.
-- [ ] **P2.2** _Prepared 2026-11-19: all fields from the factory boot.img via `unpack_bootimg --format=mkbootimg`; tested on a synthetic v3 image._ `scripts/make-bootimg.sh` for header v3: stock kernel from `firmware/boot.img` + our ramdisk (+ AVB footer if P1.10 needed it).
-- [ ] **P2.3** `scripts/try-boot.sh build/boot-stock-debug.img`.
+- [x] **P2.1** _Done 2026-11-19 (Tests 1-9): LZ4-legacy ramdisk (gzip is dropped after the vendor ramdisk), watchdog + msm-poweroff loaded first, modprobe-like loader honouring modules.softdep/dep, firmware fallback off, `initstage=N`/`initmods=N` probes._ `scripts/build-initramfs.sh` (adapted): busybox `/init` that `insmod`s from the vendor ramdisk's `/lib/modules` in `modules.load` order, starts a configfs NCM/ECM gadget at `172.16.42.1`, runs `telnetd`, never mounts userdata read-write, and returns to fastboot after 10 min.
+- [x] **P2.2** _Done 2026-11-19: all fields from the factory boot.img via `unpack_bootimg --format=mkbootimg`; no AVB footer needed for `fastboot boot`._ `scripts/make-bootimg.sh` for header v3: stock kernel from `firmware/boot.img` + our ramdisk (+ AVB footer if P1.10 needed it).
+- [x] **P2.3** _Done 2026-11-19 (Test 11): ping after 22 s, telnet root shell; 218 modules, 0 failed; gadget on a600000.dwc3. Our `/init` wins over the vendor's._ `scripts/try-boot.sh build/boot-stock-debug.img`.
   - Gate: telnet or USB-serial shell. If the vendor ramdisk's `/init` wins over ours (reported by AginxOS, unverified): log it, try `rdinit=`, then a renamed init.
-- [ ] **P2.4** ⚠️ **Backups before anything else touches the phone:** `dd` `persist`, `modemst1`, `modemst2`, `fsg`, `fsc` (IMEI + calibration) to `firmware/backup/` on the Mac.
+- [x] **P2.4** _Done 2026-11-19: `scripts/backup-nv.sh`; persist, modemst1/2, fsg, fsc in `firmware/backup/` (mode 600), SHA-256 equal on phone and Mac._ ⚠️ **Backups before anything else touches the phone:** `dd` `persist`, `modemst1`, `modemst2`, `fsg`, `fsc` (IMEI + calibration) to `firmware/backup/` on the Mac.
   - Gate: SHA-256 equal on phone and Mac. Never committed, never leaves the Mac.
 - [ ] **P2.5** Inventory: `/proc/cmdline` single keys only (never `serialno`), `/sys/firmware/fdt` → `firmware/live.dtb` (the DT **after** dtbo overlay; the board DTS reference for P6.3), `/dev/block/by-name`, LUN layout → `docs/device-info.md`.
 - [ ] **P2.6** Map `vendor_a` out of `super` with dm-linear (`parse-android-dynparts` + `dmsetup`) and mount it read-only; mount `modem_a` (vfat) read-only.
