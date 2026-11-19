@@ -41,8 +41,11 @@ log "started, kernel $(uname -r)"
 #    can hang (Test 1: an image that hung before the old timer never came back).
 stage() {
     if grep -qw "initstage=$1" /proc/cmdline; then
-        log "stage $1 reached, rebooting to bootloader"
-        sync; reboot-bootloader; sleep 30
+        # initstage_delay=S: wait S seconds first, so the return time shifts
+        # by S if (and only if) our init is what rebooted (Test 3).
+        d=$(sed -n 's/.*initstage_delay=\([0-9]*\).*/\1/p' /proc/cmdline)
+        log "stage $1 reached, rebooting to bootloader in ${d:-0} s"
+        sleep "${d:-0}"; sync; reboot-bootloader; sleep 30
     fi
 }
 if grep -qw initdebug /proc/cmdline; then
