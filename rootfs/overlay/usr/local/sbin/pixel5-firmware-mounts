@@ -28,7 +28,10 @@ echo "firmware path $FW: $(ls "$FW" | wc -l) entries"
 
 # A remote processor crash restarts that processor only. The default SYSTEM
 # level panics the kernel (subsystem_restart.c), i.e. reboots the phone.
-for s in /sys/bus/msm_subsys/devices/*; do
-    echo RELATED > "$s/restart_level"
-done
-echo "restart_level RELATED: $(cat /sys/bus/msm_subsys/devices/*/name | tr '\n' ' ')"
+# Downstream kernel only: mainline has no msm_subsys bus.
+if [ -d /sys/bus/msm_subsys ]; then
+    for s in /sys/bus/msm_subsys/devices/*; do
+        echo RELATED > "$s/restart_level"
+    done
+    echo "restart_level RELATED: $(cat /sys/bus/msm_subsys/devices/*/name | tr '\n' ' ')"
+fi

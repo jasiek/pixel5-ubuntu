@@ -4,6 +4,7 @@
 #   scripts/build-mainline.sh     -> build/mainline/out/arch/arm64/boot/Image
 #                                    and .../dts/qcom/sm7250-google-redfin.dtb
 # Our DTS files (kernel/mainline/dts/) are copied into the worktree each run.
+# MODULES=1 also builds and installs the modules (see below).
 # The submodule is never patched: the series is applied with `git am` in a
 # worktree at build/mainline/src (one commit per patch, so failures bisect),
 # rebuilt only when the stamp of (pin, series, patch files) changes.
@@ -13,7 +14,7 @@
 set -euo pipefail
 
 if [ ! -f /.dockerenv ]; then
-    DEV_CROSS=1 exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline.sh "$@"
+    DEV_CROSS=1 DEV_DOCKER_ARGS="-e MODULES" exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline.sh "$@"
 fi
 
 BASE=/work/external/linux-next
@@ -70,6 +71,14 @@ done < "$FRAG"
 DTS=arch/arm64/boot/dts/qcom
 cp /work/kernel/mainline/dts/*.dts* "$SRC/$DTS/"
 make "${ARGS[@]}" -j"$(nproc)" Image qcom/sm7250-google-redfin.dtb "$@"
+# MODULES=1: also build the modules and install them (stripped) to
+# build/mainline/out/modules-install/lib/modules/<release>.
+if [ "${MODULES:-0}" = 1 ]; then
+    make "${ARGS[@]}" -j"$(nproc)" modules
+    rm -rf "$OUT/modules-install"
+    make "${ARGS[@]}" INSTALL_MOD_PATH="$OUT/modules-install" INSTALL_MOD_STRIP=1 modules_install >/dev/null
+    echo "modules: $(find "$OUT/modules-install" -name '*.ko*' | wc -l) installed"
+fi
 # The dtbo sink only works if real labels are not exported (no dtc -@):
 # __symbols__ must hold exactly the sink's own entries.
 DTB=$OUT/$DTS/sm7250-google-redfin.dtb
