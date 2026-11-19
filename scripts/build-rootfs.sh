@@ -9,6 +9,7 @@
 # 3. in the build container: unpack, add kernel modules + SSH keys,
 #    mkfs.ext4 -d (label "ubuntu")    -> build/rootfs.img (grows on the phone)
 #    img2simg                         -> build/rootfs.simg (for fastboot)
+#    + the same tree as build/rootfs-final.tar (P3.3 RAM test)
 #
 # SSH keys installed for user ubuntu: every ~/.ssh/*.pub plus the project
 # key build/ssh/pixel5_ed25519.pub (created if missing).
@@ -87,6 +88,10 @@ else
 fi
 
 echo "built $(date -u +%FT%TZ) kernel $KREL" > "$R/etc/pixel5-build"
+
+# The same tree as a tar, for the tethered test from RAM (P3.3:
+# scripts/ramroot.sh unpacks it into a tmpfs on the phone; nothing flashed).
+tar -C "$R" --numeric-owner -cpf build/rootfs-final.tar .
 
 rm -f build/rootfs.img build/rootfs.simg
 # e2fsprogs 1.47 (Ubuntu 24.04) enables orphan_file and metadata_csum_seed by

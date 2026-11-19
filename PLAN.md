@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P3.3/P3.4 (Ubuntu rootfs: tethered test from RAM before flashing userdata).
+## ▶ RESUME HERE: P3.5 (owner OK to flash userdata; note Android would reformat it: f2fs `formattable`).
 
 ---
 
@@ -82,7 +82,7 @@ Why first: the stock kernel matches the stock vendor_boot modules, so UFS and US
 - [x] **P3.1** _Answered offline 2026-11-19: **no** (stock config has no DEVTMPFS, FHANDLE, AUTOFS; static usermode helper on). P3.2 is required._ Can Ubuntu run on the **stock** kernel? Check its config (P1.6/P2) for systemd needs: `DEVTMPFS`, `FHANDLE`, `CGROUPS`, `AUTOFS_FS`, namespaces, `SECCOMP`, `TMPFS_XATTR`. All present → skip P3.2 for milestone 1 and log it.
 - [x] **P3.2** _Done 2026-11-19 (Test 12): `4.19.325-cip136-st20-redfin-ubuntu+` + our 218 first-stage modules (`KMODS=1 build-initramfs.sh`, vendor load order, deps/softdeps from modinfo) → ping after 22 s, 0 modules failed, devtmpfs, USB serial works._ `scripts/build-kernel.sh`: LineageOS 4.19 `redbull_defconfig` + `kernel/redfin-ubuntu.config` (systemd options above; static usermode helper off; firmware user-helper fallback off; USB `CONFIGFS_NCM`). Build first-stage drivers in (`=y`) where possible; ship the rest in our initramfs, since vendor ramdisk modules won't match our vermagic.
   - Gate: compiles; `fastboot boot` reaches the P2 debug shell with our modules.
-- [ ] **P3.3** _Prepared 2026-11-19: builds (65 s), 4 GiB → 242 MB sparse; label `ubuntu`, no `orphan_file`/`metadata_csum_seed` (4.19 can't mount them rw), units enabled, keys + qbootctl in. Kernel modules get added once build-kernel.sh has run._ `scripts/build-rootfs.sh` (adapted): ext4 label **`ubuntu`** (the initramfs refuses anything else), ubuntu-base 24.04, hostname `pixel5`, user `ubuntu` + SSH keys, NetworkManager, avahi, USB gadget unit, kernel modules → ext4 `build/rootfs.img` → `img2simg`.
+- [x] **P3.3** _Done 2026-11-19 (Test 15): booted from RAM via `scripts/ramroot.sh`: Ubuntu 24.04.5, systemd running, 0 failed units, SSH over USB. Fixed NCM MACs needed (Test 13)._ _Prepared 2026-11-19: builds (65 s), 4 GiB → 242 MB sparse; label `ubuntu`, no `orphan_file`/`metadata_csum_seed` (4.19 can't mount them rw), units enabled, keys + qbootctl in. Kernel modules get added once build-kernel.sh has run._ `scripts/build-rootfs.sh` (adapted): ext4 label **`ubuntu`** (the initramfs refuses anything else), ubuntu-base 24.04, hostname `pixel5`, user `ubuntu` + SSH keys, NetworkManager, avahi, USB gadget unit, kernel modules → ext4 `build/rootfs.img` → `img2simg`.
 - [ ] **P3.4** initramfs: find userdata by partlabel, `resize2fs` once, `switch_root`; debug shell on failure.
 - [ ] **P3.5** ⚠️ (owner OK) `fastboot flash userdata build/rootfs.simg`, then `scripts/try-boot.sh build/boot.img`.
   - Gate: `ssh ubuntu@172.16.42.1` works. 🎉 **Milestone 1: Ubuntu 24.04 runs on the Pixel 5.**
