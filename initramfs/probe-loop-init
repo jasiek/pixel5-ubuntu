@@ -1,0 +1,36 @@
+#!/bin/busybox sh
+# SPDX-License-Identifier: MIT
+# Probe init, "flight recorder" variant (P8.3): for kernels that reset within
+# seconds. Mounts userdata as soon as UFS appears and rewrites
+# /mainline-probe/loop.txt (dmesg, synced) every 0.5 s for 60 s, then
+# reboots into fastboot. After a reset, the last copy shows what the kernel
+# was doing ~0.5 s before. Read it from the normal Ubuntu.
+/bin/busybox --install -s /bin
+export PATH=/bin
+mkdir -p /proc /sys /dev /newroot
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devtmpfs devtmpfs /dev
+root=""
+for i in $(seq 1 300); do
+    for u in /sys/class/block/*/uevent; do
+        grep -q '^PARTNAME=userdata$' "$u" && root="/dev/$(sed -n 's/^DEVNAME=//p' "$u")"
+    done
+    [ -n "$root" ] && break
+    sleep 0.1
+done
+[ -n "$root" ] || { sleep 5; reboot-bootloader; }
+mount -t ext4 -o rw,noatime,sync "$root" /newroot || { sleep 5; reboot-bootloader; }
+D=/newroot/mainline-probe
+mkdir -p $D
+n=0
+while [ $n -lt 120 ]; do
+    { echo "== t=$n"; cat /proc/uptime; dmesg; } > $D/loop.tmp 2>&1
+    mv $D/loop.tmp $D/loop.txt
+    sync
+    n=$((n + 1))
+    sleep 0.5
+done
+umount /newroot
+sync
+reboot-bootloader

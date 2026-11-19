@@ -1,0 +1,126 @@
+#!/bin/busybox sh
+# SPDX-License-Identifier: MIT
+# Pixel 5 (redfin) initramfs: find the userdata partition (= Ubuntu root),
+# then switch_root into systemd.
+#
+# Debugging over USB (works even if Ubuntu never starts):
+#   - USB network: NCM, phone 172.16.42.1, DHCP for the host, telnet on port 23
+#   - USB serial:  ACM, getty with a root shell on /dev/ttyGS0
+# Add "initdebug" to the kernel cmdline to stop here on purpose.
+# Messages go to /dev/kmsg, so they also land in dmesg / pstore.
+
+/bin/busybox --install -s /bin
+export PATH=/bin
+
+mkdir -p /proc /sys /dev /tmp /run /newroot
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts
+mount -t devpts   devpts   /dev/pts
+mount -t configfs configfs /sys/kernel/config
+mount -t tmpfs    tmpfs    /tmp
+
+log() { echo "initramfs: $*" > /dev/kmsg; echo "initramfs: $*" >> /tmp/init.log; }
+log "started, kernel $(uname -r)"
+
+# ---- USB gadget: NCM network + ACM serial ---------------------------------
+G=/sys/kernel/config/usb_gadget/g1
+setup_usb() {
+    mkdir -p $G/strings/0x409 $G/functions/ncm.usb0 $G/functions/acm.GS0 \
+             $G/configs/c.1/strings/0x409
+    # Do NOT write ncm.usb0/dev_addr or host_addr here: in the Pixel 2's 4.4 kernel the
+    # NCM net device only exists after bind (ncm_bind), so the write dereferences
+    # NULL and panicked the kernel (2026-11-17). After bind it returns EBUSY.
+    # Untested on redfin's 4.19: keep it this way until proven safe.
+    # Untested on redfin's 4.19; keep the same order until proven safe.
+    echo 0x18d1 > $G/idVendor
+    echo 0xd001 > $G/idProduct
+    echo "Google"           > $G/strings/0x409/manufacturer
+    echo "Pixel 5 (Ubuntu)" > $G/strings/0x409/product
+    echo "pixel5-ubuntu"    > $G/strings/0x409/serialnumber
+    echo "NCM + ACM"        > $G/configs/c.1/strings/0x409/configuration
+    ln -s $G/functions/ncm.usb0 $G/configs/c.1/
+    ln -s $G/functions/acm.GS0  $G/configs/c.1/
+    for i in $(seq 1 50); do
+        udc=$(ls /sys/class/udc 2>/dev/null | head -n1)
+        [ -n "$udc" ] && break
+        sleep 0.1
+    done
+    if [ -n "$udc" ]; then
+        echo "$udc" > $G/UDC && log "usb gadget bound to $udc"
+    else
+        log "no USB device controller found"
+    fi
+}
+setup_usb
+
+# Serial root shell on the USB ACM port, available in every mode
+# (until switch_root replaces this process tree).
+(
+    while true; do
+        [ -e /dev/ttyGS0 ] && setsid getty -n -l /bin/sh 115200 ttyGS0 vt100
+        sleep 2
+    done
+) &
+getty_loop=$!
+
+# ---- debug shell ------------------------------------------------------------
+debug_shell() {
+    log "entering debug mode: $*"
+    ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up
+    cat > /tmp/udhcpd.conf <<EOF
+start 172.16.42.2
+end 172.16.42.20
+interface usb0
+option subnet 255.255.255.0
+lease_file /tmp/udhcpd.leases
+EOF
+    touch /tmp/udhcpd.leases
+    udhcpd /tmp/udhcpd.conf
+    telnetd -b 172.16.42.1:23 -l /bin/sh
+    log "telnet 172.16.42.1 (debug shell); log: /tmp/init.log; pstore: /sys/fs/pstore"
+    mkdir -p /sys/fs/pstore
+    mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+    # Unattended safety net: go back to fastboot after 10 min unless someone
+    # ran `touch /tmp/keep` (initdebug_timeout=<s> on the cmdline overrides).
+    t=$(sed -n 's/.*initdebug_timeout=\([0-9]*\).*/\1/p' /proc/cmdline)
+    ( sleep "${t:-600}"; [ -e /tmp/keep ] || { log "debug timeout, rebooting to bootloader"; reboot-bootloader; } ) &
+    while true; do sleep 3600; done
+}
+
+grep -qw initdebug /proc/cmdline && debug_shell "initdebug on cmdline"
+
+# ---- find and mount the root (userdata partition) ---------------------------
+find_userdata() {
+    for u in /sys/class/block/*/uevent; do
+        if grep -q '^PARTNAME=userdata$' "$u"; then
+            echo "/dev/$(sed -n 's/^DEVNAME=//p' "$u")"
+            return 0
+        fi
+    done
+    return 1
+}
+
+root=""
+for i in $(seq 1 150); do          # UFS can take a few seconds to probe
+    root=$(find_userdata) && break
+    sleep 0.2
+done
+[ -n "$root" ] || debug_shell "userdata partition not found"
+log "userdata is $root"
+
+mount -t ext4 -o rw,noatime "$root" /newroot || debug_shell "mounting $root failed"
+[ -x /newroot/sbin/init ] || [ -L /newroot/sbin/init ] || debug_shell "/sbin/init missing in $root"
+
+# ---- hand over to systemd ---------------------------------------------------
+log "switching root to $root"
+# Stop the serial shell loop: after switch_root its binaries are gone, so it
+# would spin (thousands of failed forks per second) and fight systemd's getty.
+kill "$getty_loop" 2>/dev/null
+killall getty 2>/dev/null
+cp /tmp/init.log /newroot/run/initramfs.log 2>/dev/null
+umount /tmp
+umount /dev/pts
+for m in /dev /proc /sys; do mount --move $m /newroot$m; done
+exec switch_root /newroot /sbin/init

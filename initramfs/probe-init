@@ -1,0 +1,65 @@
+#!/bin/busybox sh
+# SPDX-License-Identifier: MIT
+# Probe init for kernel bring-up (P8.3, mainline): no USB console needed.
+# Writes kernel logs to /mainline-probe/ on the userdata ext4 filesystem,
+# then reboots into fastboot. Read them afterwards from the normal Ubuntu.
+#   1-before-usb.txt  dmesg etc. before the USB gadget is set up (synced)
+#   2-after-usb.txt   the same 5 s after binding the gadget
+# If only file 1 exists, the gadget setup crashed the kernel.
+
+/bin/busybox --install -s /bin
+export PATH=/bin
+mkdir -p /proc /sys /dev /tmp /newroot
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t configfs configfs /sys/kernel/config
+mount -t debugfs  debugfs  /sys/kernel/debug
+echo "probe: started" > /dev/kmsg
+
+sleep 8   # let drivers probe
+
+root=""
+for i in $(seq 1 150); do
+    for u in /sys/class/block/*/uevent; do
+        grep -q '^PARTNAME=userdata$' "$u" && root="/dev/$(sed -n 's/^DEVNAME=//p' "$u")"
+    done
+    [ -n "$root" ] && break
+    sleep 0.2
+done
+[ -n "$root" ] || { echo "probe: no userdata" > /dev/kmsg; sleep 5; reboot-bootloader; }
+mount -t ext4 -o rw,noatime "$root" /newroot || { sleep 5; reboot-bootloader; }
+D=/newroot/mainline-probe
+mkdir -p $D
+
+snapshot() {
+    {
+        echo "== uname"; uname -a
+        echo "== cmdline"; cat /proc/cmdline
+        echo "== udc"; ls /sys/class/udc
+        echo "== net"; ls /sys/class/net
+        echo "== block"; ls /sys/class/block | tr '\n' ' '; echo
+        echo "== modules"; cat /proc/modules
+        echo "== deferred"; cat /sys/kernel/debug/devices_deferred 2>/dev/null
+        echo "== dmesg"; dmesg
+    } > "$D/$1" 2>&1
+    sync
+}
+
+snapshot 1-before-usb.txt
+
+G=/sys/kernel/config/usb_gadget/g1
+mkdir -p $G/strings/0x409 $G/functions/ncm.usb0 $G/functions/acm.GS0 $G/configs/c.1/strings/0x409
+echo 0x18d1 > $G/idVendor
+echo 0xd001 > $G/idProduct
+echo "Pixel 5 (Ubuntu probe)" > $G/strings/0x409/product
+ln -s $G/functions/ncm.usb0 $G/configs/c.1/
+ln -s $G/functions/acm.GS0  $G/configs/c.1/
+udc=$(ls /sys/class/udc 2>/dev/null | head -n1)
+[ -n "$udc" ] && echo "$udc" > $G/UDC
+sleep 5
+
+snapshot 2-after-usb.txt
+umount /newroot
+sync
+reboot-bootloader
