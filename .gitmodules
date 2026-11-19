@@ -32,3 +32,11 @@
 [submodule "external/tqftpserv"]
 	path = external/tqftpserv
 	url = https://github.com/linux-msm/tqftpserv
+[submodule "external/nairo"]
+	path = external/nairo
+	url = https://github.com/effeffe/nairoArchLinuxArmTools
+	shallow = true
+[submodule "external/linux-next"]
+	path = external/linux-next
+	url = https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git
+	shallow = true

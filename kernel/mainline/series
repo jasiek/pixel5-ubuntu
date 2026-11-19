@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT
+# Patch series for the mainline kernel (P6.1 first gate), applied in order on
+# external/linux-next (next-20261021) by scripts/build-mainline.sh.
+#   <source> <path>     source: nairo = external/nairo/kernel/patches/ (pinned
+#                       submodule, effeffe/nairoArchLinuxArmTools @ 665f098);
+#                       local = kernel/mainline/patches/ (ours, GPL-2.0-only)
+# Selection and reasons: docs/research/mainline-tree.md §2. nairo licence:
+# pending the author's confirmation (PLAN P6.1); builds stay local until then.
+nairo 0001-dt-bindings-clock-Add-SM7250-global-clock-controller.patch
+nairo 0002-clk-qcom-Add-Global-Clock-Controller-GCC-driver-for-.patch
+nairo 0003-dt-bindings-firmware-qcom-scm-Document-SM7250-SCM.patch
+nairo 0004-dt-bindings-cpufreq-qcom-hw-Document-SM7250-cpufreq-.patch
+nairo 0005-arm64-dts-qcom-Add-SM7250-devicetree-file.patch
+nairo 0006-dt-bindings-pinctrl-qcom-Add-SM7250-TLMM.patch
+nairo 0007-pinctrl-qcom-Add-SM7250-TLMM-driver.patch
+nairo 0008-dt-bindings-iommu-arm-smmu-Add-SM7250-SMMU.patch
+nairo 0009-dt-bindings-phy-qcom-usb-snps-femto-v2-Add-SM7250.patch
+nairo 0010-dt-bindings-usb-qcom-snps-dwc3-Add-SM7250.patch
+nairo 0011-dt-bindings-phy-qcom-sc8280xp-qmp-ufs-phy-Add-SM7250.patch
+nairo 0012-dt-bindings-ufs-qcom-sc7180-ufshc-Add-SM7250.patch
+nairo 0014-phy-qcom-qmp-ufs-Add-SM7250-support.patch
+nairo 0015-scsi-ufs-qcom-Restrict-SM7250-to-a-32-bit-DMA-mask.patch
+nairo 0020-arm64-dts-qcom-sm7250-Fix-cluster-idle-state-PSCI-pa.patch
+nairo 0021-arm64-dts-qcom-sm7250-Add-TLMM.patch
+nairo 0022-arm64-dts-qcom-sm7250-Add-apps-SMMU.patch
+nairo 0023-arm64-dts-qcom-sm7250-Add-USB-2.0-controller-and-PHY.patch
+nairo 0024-arm64-dts-qcom-sm7250-Add-UFS-host-and-PHY.patch
+nairo 0044-arm64-dts-qcom-sm7250-Describe-the-CPUs-as-a-single-.patch
+nairo 0060-LOCAL-pmdomain-qcom-rpmhpd-Keep-qphy.lvl-voted-on-SM.patch
+nairo 0061-phy-qcom-qmp-ufs-Use-the-downstream-reset-sequence-o.patch
+nairo 0073-scsi-ufs-qcom-Map-150-MHz-UniPro-to-HS-G3-on-SM7250.patch
+# optional (suspend only): nairo 0112-usb-dwc3-qcom-Reapply-UTMI-pipe-clk-on-resume.patch
