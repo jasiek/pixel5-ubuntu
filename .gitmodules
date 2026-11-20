@@ -46,3 +46,6 @@
 [submodule "external/fastrpc"]
 	path = external/fastrpc
 	url = https://github.com/qualcomm/fastrpc
+[submodule "external/lmdpdg"]
+	path = external/lmdpdg
+	url = https://github.com/msm8916-mainline/linux-mdss-dsi-panel-driver-generator
