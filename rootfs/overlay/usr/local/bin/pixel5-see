@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Talk to the ADSP's sensor framework (SEE) from Linux.
+
+  pixel5-see list [data_type ...]          which sensors exist (SUIDs)
+  pixel5-see read <data_type> [Hz] [s]     stream samples (default 10 Hz, 3 s)
+  pixel5-see read proximity --on-change    on-change sensors (light, prox)
+
+QMI over QRTR (Python's AF_QIPCRTR) to the SEE client service (400):
+sns_suid_req lookups to the SUID sensor, then sns_std_sensor_config to the
+sensor; events are sns_std_sensor_event floats. Protobuf and QMI are
+encoded by hand (only the few fields used here). docs/log.md Tests 129, 133.
+Needs root (or the qrtr socket) and the ADSP running (pixel5-adsp.service).
+"""
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+SNS_CLIENT_SVC = 400
+SUID_SENSOR = (0xABABABABABABABAB, 0xABABABABABABABAB)  # the lookup sensor
+SNS_SUID_MSGID_REQ = 512
+SNS_SUID_MSGID_EVENT = 768
+SNS_STD_SENSOR_CONFIG = 513
+SNS_STD_ON_CHANGE_CONFIG = 514
+SNS_STD_SENSOR_EVENT = 1025
+QMI_REQ, QMI_RESP, QMI_IND = 0, 2, 4
+SNS_CLIENT_REQ = 0x20
+SNS_CLIENT_REPORT_IND = 0x22
+SNS_CLIENT_JUMBO_REPORT_IND = 0x21
+
+DEFAULT_TYPES = [
+    "suid", "registry", "timer", "interrupt", "async_com_port",
+    "remote_proc_state", "resampler", "accel_cal", "gyro_cal", "mag_cal",
+    "accel", "gyro", "mag", "pressure", "ambient_light", "proximity",
+    "sensor_temperature", "device_orient", "sar", "touch_gesture",
+    "sig_motion", "pedometer", "rotv", "gravity", "amd",
+]
+
+
+# --- protobuf (just enough) ---
+def varint(n):
+    out = b""
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        if n:
+            out += bytes([b | 0x80])
+        else:
+            return out + bytes([b])
+
+
+def f_varint(num, v):
+    return varint(num << 3 | 0) + varint(v)
+
+
+def f_bytes(num, b):
+    return varint(num << 3 | 2) + varint(len(b)) + b
+
+
+def f_fixed32(num, v):
+    return varint(num << 3 | 5) + struct.pack("<I", v)
+
+
+def f_fixed64(num, v):
+    return varint(num << 3 | 1) + struct.pack("<Q", v)
+
+
+def _varint_at(buf, i):
+    v, n = 0, 0
+    while True:
+        b = buf[i]
+        i += 1
+        v |= (b & 0x7F) << n
+        n += 7
+        if not b & 0x80:
+            return v, i
+
+
+def parse(buf):
+    """-> list of (field, wiretype, value)"""
+    i, out = 0, []
+    while i < len(buf):
+        key, i = _varint_at(buf, i)
+        num, wt = key >> 3, key & 7
+        if wt == 0:
+            v, i = _varint_at(buf, i)
+        elif wt == 1:
+            v = struct.unpack_from("<Q", buf, i)[0]
+            i += 8
+        elif wt == 5:
+            v = struct.unpack_from("<I", buf, i)[0]
+            i += 4
+        elif wt == 2:
+            ln, i = _varint_at(buf, i)
+            v = buf[i:i + ln]
+            i += ln
+        else:
+            raise ValueError("wire type %d" % wt)
+        out.append((num, wt, v))
+    return out
+
+
+def suid_msg(lo, hi):
+    return f_fixed64(1, lo) + f_fixed64(2, hi)
+
+
+def client_request(suid, msg_id, payload):
+    std_request = f_bytes(2, payload) if payload else b""     # payload
+    susp = f_varint(1, 1) + f_varint(2, 0)                   # APSS, wakeup
+    return (f_bytes(1, suid_msg(*suid)) + f_fixed32(2, msg_id)
+            + f_bytes(3, susp) + f_bytes(4, std_request))
+
+
+def suid_request(data_type):
+    req = f_bytes(1, data_type.encode()) + f_varint(2, 1)  # register_updates
+    return client_request(SUID_SENSOR, SNS_SUID_MSGID_REQ, req)
+
+
+# --- QMI ---
+def qmi(msg_type, txn, msg_id, tlvs):
+    body = b"".join(struct.pack("<BH", t, len(v)) + v for t, v in tlvs)
+    return struct.pack("<BHHH", msg_type, txn, msg_id, len(body)) + body
+
+
+def qmi_parse(pkt):
+    msg_type, txn, msg_id, ln = struct.unpack_from("<BHHH", pkt)
+    i, tlvs = 7, {}
+    while i < 7 + ln:
+        t, l = struct.unpack_from("<BH", pkt, i)
+        tlvs[t] = pkt[i + 3:i + 3 + l]
+        i += 3 + l
+    return msg_type, txn, msg_id, tlvs
+
+
+def find_service():
+    out = subprocess.run(["qrtr-lookup"], capture_output=True, text=True).stdout
+    for line in out.splitlines()[1:]:
+        f = line.split()
+        if len(f) >= 5 and f[0] == str(SNS_CLIENT_SVC):
+            return int(f[3]), int(f[4])
+    return None
+
+
+class See:
+    def __init__(self):
+        self.addr = None
+        for _ in range(100):
+            self.addr = find_service()
+            if self.addr:
+                break
+            time.sleep(0.1)
+        if not self.addr:
+            raise SystemExit("SEE client service %d not found" % SNS_CLIENT_SVC)
+        self.s = socket.socket(socket.AF_QIPCRTR, socket.SOCK_DGRAM)
+        self.s.settimeout(0.3)
+        self.txn = 0
+
+    def send(self, req):
+        self.txn += 1
+        self.s.sendto(qmi(QMI_REQ, self.txn, SNS_CLIENT_REQ,
+                          [(0x01, struct.pack("<H", len(req)) + req),
+                           (0x10, b"\x01")]), self.addr)  # use_jumbo_report
+        return self.txn
+
+    def events(self, seconds):
+        """yield (suid_lo, suid_hi, msg_id, payload) until the deadline"""
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            try:
+                pkt, _ = self.s.recvfrom(65536)
+            except socket.timeout:
+                continue
+            mt, txn, mid, tlvs = qmi_parse(pkt)
+            if mt == QMI_RESP:
+                r, e = struct.unpack_from("<HH", tlvs.get(0x02, b"\0\0\0\0"))
+                if r:
+                    print("request %d: QMI error %d" % (txn, e), file=sys.stderr)
+                continue
+            if mt != QMI_IND or mid not in (SNS_CLIENT_REPORT_IND,
+                                            SNS_CLIENT_JUMBO_REPORT_IND):
+                continue
+            p = tlvs.get(0x02, b"")
+            if len(p) < 2:
+                continue
+            ln = struct.unpack_from("<H", p)[0]
+            msg = parse(p[2:2 + ln])
+            suid = {}
+            for num, _, v in msg:
+                if num == 1:
+                    suid = {a: b for a, _, b in parse(v)}
+            for num, _, v in msg:
+                if num == 2:      # events
+                    ev = {n: val for n, _, val in parse(v)}
+                    yield suid.get(1), suid.get(2), ev.get(1), ev.get(3, b"")
+
+    def lookup(self, types, seconds=3):
+        for dt in types:
+            self.send(suid_request(dt))
+        found = {}
+        for _, _, mid, payload in self.events(seconds):
+            if mid != SNS_SUID_MSGID_EVENT:
+                continue
+            dt, suids = None, []
+            for n, _, val in parse(payload):
+                if n == 1:
+                    dt = val.decode(errors="replace")
+                elif n == 2:
+                    f = {a: b for a, _, b in parse(val)}
+                    suids.append((f.get(1, 0), f.get(2, 0)))
+            # A first answer can be empty while sensors still register
+            # (register_updates sends the full list later): keep waiting.
+            if suids or dt not in found:
+                found[dt] = suids
+            if all(found.get(t) for t in types):
+                break
+        return found
+
+
+def floats(payload):
+    """sns_std_sensor_event: repeated float data = 1 (packed or not)"""
+    out = []
+    for n, wt, v in parse(payload):
+        if n != 1:
+            continue
+        if wt == 2:
+            out += struct.unpack("<%df" % (len(v) // 4), v)
+        elif wt == 5:
+            out.append(struct.unpack("<f", struct.pack("<I", v))[0])
+    return out
+
+
+def cmd_list(types):
+    types = types or DEFAULT_TYPES
+    found = See().lookup(types)
+    for dt in types:
+        suids = found.get(dt)
+        if suids is None:
+            text = "no answer"
+        else:
+            text = ", ".join("%016x%016x" % (h, l) for l, h in suids) or "none"
+        print("%-20s %s" % (dt, text))
+
+
+def cmd_read(args):
+    on_change = "--on-change" in args
+    args = [a for a in args if a != "--on-change"]
+    if not args:
+        raise SystemExit(__doc__)
+    dt = args[0]
+    rate = float(args[1]) if len(args) > 1 else 10.0
+    secs = float(args[2]) if len(args) > 2 else 3.0
+    see = See()
+    suids = see.lookup([dt]).get(dt)
+    if not suids:
+        raise SystemExit("no %s sensor" % dt)
+    suid = suids[0]
+    if on_change:
+        see.send(client_request(suid, SNS_STD_ON_CHANGE_CONFIG, b""))
+    else:
+        see.send(client_request(suid, SNS_STD_SENSOR_CONFIG,
+                                varint(1 << 3 | 5) + struct.pack("<f", rate)))
+    n, t0 = 0, time.time()
+    for lo, hi, mid, payload in see.events(secs):
+        if (lo, hi) != suid or mid != SNS_STD_SENSOR_EVENT:
+            continue
+        n += 1
+        print("%7.3f %s" % (time.time() - t0,
+                            " ".join("%10.4f" % x for x in floats(payload))))
+    print("%d samples from %s in %.1f s" % (n, dt, secs))
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in ("list", "read"):
+        print(__doc__)
+        return 2
+    if sys.argv[1] == "list":
+        cmd_list(sys.argv[2:])
+    else:
+        cmd_read(sys.argv[2:])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
