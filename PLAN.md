@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: mainline with ADSP sensors is the default (boot_b, `gdadf8b4adcdb`). s2idle works but never reaches AOSS sleep (parked, see Tests 101–131). Next: Phase 7 (one-command build).
+## ▶ RESUME HERE: P7.2 gate: a full `scripts/flash.sh` run (owner OK: it wipes userdata). Then back to P6.4 (display, touch, audio).
 
 ---
 
@@ -130,11 +130,11 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
 - [x] **P6.5** (owner OK) Flash mainline as default on the active slot; downstream stays on the other. _Done 2026-11-20: mainline on boot_b (slot a is factory-unbootable, so downstream is a backup image instead: build/backup/boot_b-downstream-2026-11-20.img). SSH 28 s after power-on._
 
 ## Phase 7: One-command build + guided flashing (half a day; copy Pixel 2 P9)
-- [ ] **P7.1** `scripts/build-all.sh` (hash-gated steps, as in the Pixel 2): submodules, container, kernel(s), initramfs, boot images, rootfs, firmware staging scripts.
+- [x] **P7.1** _Done 2026-11-20: fresh clone → images with only the factory zip added (≈1 h 40 min cold); two gaps found and fixed (battery data from the kernel source, vendor module order from vendor_boot.img). Mainline kernel modules now in the rootfs._ `scripts/build-all.sh` (hash-gated steps, as in the Pixel 2): submodules, container, kernel(s), initramfs, boot images, rootfs, firmware staging scripts.
   - Gate: fresh clone → images, no manual steps.
-- [ ] **P7.2** `scripts/flash.sh`: checks the phone is redfin + unlocked + on the final build, asks for `yes`, flashes vbmeta/boot/(vendor_boot)/userdata on explicit `_a`/`_b`, waits for SSH. Plus `restore`.
+- [ ] **P7.2** _Written 2026-11-20; phone checks tested read-only. Flashing path untested (wipes userdata)._ `scripts/flash.sh`: checks the phone is redfin + unlocked + on the final build, asks for `yes`, flashes vbmeta/boot/(vendor_boot)/userdata on explicit `_a`/`_b`, waits for SSH. Plus `restore`.
   - Gate: someone else flashes a phone using only README + `flash.sh`.
-- [ ] **P7.3** README: install flow.
+- [x] **P7.3** README: install flow. _Done 2026-11-20; repo public at github.com/jasiek/pixel5-ubuntu._
 
 ## Parked (research problems; pick up only on request)
 Cameras (no SM7250 CAMSS, no IMX363/IMX481 drivers), rear fingerprint (TrustZone), CDSP + Venus video (TZ refuses on other SM7250 phones), wireless charging (P9382), 5G NR and VoLTE (unproven anywhere), NFC (ST21NFC fit unverified), modem data/SMS on downstream (needs a SIM).
