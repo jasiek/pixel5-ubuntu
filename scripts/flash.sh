@@ -180,5 +180,5 @@ fi
 ok "Ubuntu is up at $up"
 echo "  Log in: ssh -i $KEY ubuntu@$up   (or PIXEL5_HOST=$up scripts/ssh.sh)"
 ask "Did the phone buzz twice when it came up?" && ok "haptics" || warn "haptics: see PLAN.md P6.4"
-echo "The screen stays dark: there is no display driver yet (PLAN.md P6.4)."
+echo "The screen shows a text console and switches off after 60 s idle; Power wakes it."
 echo "Done."
