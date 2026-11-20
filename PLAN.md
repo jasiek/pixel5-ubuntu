@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: **Owner first:** boot mainline once and look at the screen: is the white Google splash still lit (OLED burn-in hazard, docs/log.md after Test 95)? Then P6.4 GPU A620 (simpledrm first; it must take over or blank the panel).
+## ▶ RESUME HERE: **Owner:** (1) look at the screen during a mainline boot: splash gone after ~30 s? (Tests 96–97: rails off, 100 mA less); (2) P6.5 needs your OK to flash mainline as default. Meanwhile P6.4 GPU A620 (nairo 0033–0036 apply; GPU nodes in our board DTS), Bluetooth, haptics (DRV2624: the mainline alive signal).
 
 ---
 
