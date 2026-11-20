@@ -10,6 +10,7 @@
 /dts-v1/;
 
 #include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/clock/qcom,dispcc-sm8250.h>
 #include <dt-bindings/clock/qcom,gpucc-sm8250.h>
 #include <dt-bindings/firmware/qcom,scm.h>
 #include <dt-bindings/gpio/gpio.h>
@@ -767,6 +768,33 @@
 				opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
 			};
 		};
+	};
+
+	/*
+	 * Display clock controller (live DT qcom,dispcc@af00000; node as
+	 * nairo 0088). With it Linux owns the MDSS GDSC and the display
+	 * clocks the bootloader leaves running after the splash. DSI/DP PHY
+	 * clocks come with the display nodes.
+	 */
+	dispcc: clock-controller@af00000 {
+		compatible = "qcom,sm7250-dispcc";
+		reg = <0x0 0x0af00000 0x0 0x20000>;
+		power-domains = <&rpmhpd RPMHPD_CX>;
+		required-opps = <&rpmhpd_opp_low_svs>;
+		clocks = <&rpmhcc RPMH_CXO_CLK>,
+			 <&gcc GCC_DISP_GPLL0_CLK_SRC>,
+			 <0>, <0>, <0>, <0>, <0>, <0>;
+		clock-names = "bi_tcxo",
+			      "gcc_disp_gpll0_clk_src",
+			      "dsi0_phy_pll_out_byteclk",
+			      "dsi0_phy_pll_out_dsiclk",
+			      "dsi1_phy_pll_out_byteclk",
+			      "dsi1_phy_pll_out_dsiclk",
+			      "dp_phy_pll_link_clk",
+			      "dp_phy_pll_vco_div_clk";
+		#clock-cells = <1>;
+		#reset-cells = <1>;
+		#power-domain-cells = <1>;
 	};
 
 	/* Live DT qcom,gpucc@3d90000 (SM8250 GPU clock controller, SM7250 PLL) */

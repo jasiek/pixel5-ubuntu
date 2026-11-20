@@ -53,6 +53,11 @@ nairo 0033-clk-qcom-gpucc-sm8250-Add-SM7250-support.patch
 nairo 0034-soc-qcom-ubwc-Add-SM7250.patch
 nairo 0035-iommu-arm-smmu-qcom-Don-t-enable-PRR-on-the-SM7250-A.patch
 nairo 0036-drm-msm-a6xx-Add-A620-support.patch
+# P6.4 display, stage A: display clock controller (dispcc) only, so Linux
+# owns the MDSS GDSC and display clocks the bootloader leaves running
+# (0088, the node, sits on nairo's other DT patches: node in our board DTS)
+nairo 0086-dt-bindings-clock-qcom-Add-SM7250-display-clock-cont.patch
+nairo 0087-clk-qcom-dispcc-sm8250-Add-SM7250-support.patch
 # optional (suspend only): nairo 0112-usb-dwc3-qcom-Reapply-UTMI-pipe-clk-on-resume.patch
 # Bring-up aid (ours, GPL-2.0-only like the kernel): pixel5.reset_at=N
 local 0001-LOCAL-arm64-pixel5.reset_at-N-boot-stage-probe.patch
