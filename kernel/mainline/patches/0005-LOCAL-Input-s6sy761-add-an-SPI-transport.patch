@@ -1,0 +1,1531 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Fri, 20 Nov 2026 23:40:00 +0000
+Subject: [PATCH] LOCAL: Input: s6sy761 - add an SPI transport
+
+The Pixel 5 touch controller, a Samsung S6SY79x, sits on SPI (QUP0 SE0)
+and speaks the same command set and event format as the S6SY761: sense
+on 0x10, events 0x60/0x61, boot status 0x55, panel info 0x23, power
+mode 0xe4. Only the bus framing differs. Google's downstream driver
+(redbull kernel, drivers/input/touchscreen/sec_touch/sec_ts.c, Samsung,
+GPL-2.0) wraps every register access in a sync byte, 16-bit lengths
+and a byte-sum checksum, padded to 4 bytes; a read is a request
+transfer, a short delay, then a separate read of the reply.
+
+This moves the driver's bus access behind two callbacks (read and
+write a register), keeps the I2C path byte-for-byte equivalent, and
+adds an SPI driver with that framing. Also: an optional reset GPIO
+(pulsed at power-on, as downstream does) and polling for the
+boot-complete event (up to 1 s) instead of a single read after 140 ms.
+---
+ drivers/input/touchscreen/Kconfig             |   5 +-
+ drivers/input/touchscreen/s6sy761.c           | 496 +++++++++---
+ ...L-Input-s6sy761-add-an-SPI-transport.patch | 755 ++++++++++++++++++
+ 3 files changed, 1161 insertions(+), 95 deletions(-)
+ create mode 100644 out/0001-LOCAL-Input-s6sy761-add-an-SPI-transport.patch
+
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 9b9ae8a..e75a3b4 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -529,9 +529,10 @@ config TOUCHSCREEN_IPROC
+ 
+ config TOUCHSCREEN_S6SY761
+ 	tristate "Samsung S6SY761 Touchscreen driver"
+-	depends on I2C
++	depends on I2C && SPI_MASTER
+ 	help
+-	  Say Y if you have the Samsung S6SY761 driver
++	  Say Y if you have the Samsung S6SY761 driver, on I2C or on SPI
++	  (S6SY79x, Google Pixel 5)
+ 
+ 	  If unsure, say N
+ 
+diff --git a/drivers/input/touchscreen/s6sy761.c b/drivers/input/touchscreen/s6sy761.c
+index 1bd4ddf..d20e746 100644
+--- a/drivers/input/touchscreen/s6sy761.c
++++ b/drivers/input/touchscreen/s6sy761.c
+@@ -3,9 +3,14 @@
+ //
+ // Copyright (c) 2017 Samsung Electronics Co., Ltd.
+ // Copyright (c) 2017 Andi Shyti <andi@etezian.org>
++//
++// SPI transport: the framing of Samsung's sec_ts driver in Google's redbull
++// kernel (drivers/input/touchscreen/sec_touch, GPL-2.0), used by the S6SY79x
++// of the Pixel 5.
+ 
+ #include <linux/unaligned.h>
+ #include <linux/delay.h>
++#include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
+ #include <linux/input/mt.h>
+ #include <linux/input/touchscreen.h>
+@@ -14,6 +19,7 @@
+ #include <linux/module.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/regulator/consumer.h>
++#include <linux/spi/spi.h>
+ 
+ /* commands */
+ #define S6SY761_SENSE_ON		0x10
+@@ -93,13 +99,49 @@
+ 
+ #define S6SY761_DEV_NAME	"s6sy761"
+ 
++/* after power-on/reset: poll for the boot-complete event */
++#define S6SY761_BOOT_DELAY_MS		70
++#define S6SY761_BOOT_POLL_MS		20
++#define S6SY761_BOOT_POLL_COUNT		50
++
++/*
++ * SPI framing. Write: sync, 16-bit length of reg + data, 16-bit 0, reg,
++ * data, checksum (byte sum). Read request: sync, 16-bit 1, 16-bit length,
++ * reg, checksum; then, after a short delay, a separate read of sync,
++ * lengths, reg, status, data, checksum (over all bytes before it).
++ * Every transfer is zero-padded to a multiple of 4 bytes.
++ */
++#define S6SY761_SPI_SYNC		0xaa
++#define S6SY761_SPI_HDR			5
++#define S6SY761_SPI_RD_HDR		7
++#define S6SY761_SPI_BUF_SIZE		ALIGN(S6SY761_SPI_RD_HDR + \
++					      S6SY761_EVENT_SIZE * \
++					      S6SY761_EVENT_COUNT + 1, 4)
++#define S6SY761_SPI_RETRIES		3
++
+ enum s6sy761_regulators {
+ 	S6SY761_REGULATOR_VDD,
+ 	S6SY761_REGULATOR_AVDD,
+ };
+ 
++struct s6sy761_data;
++
++struct s6sy761_bus_ops {
++	int (*read)(struct s6sy761_data *sdata, u8 reg, u8 *buf, u16 len);
++	int (*write)(struct s6sy761_data *sdata, u8 reg, const u8 *buf,
++		     u16 len);
++};
++
+ struct s6sy761_data {
++	struct device *dev;
++	int irq;
++	const struct s6sy761_bus_ops *ops;
+ 	struct i2c_client *client;
++	struct spi_device *spi;
++	struct mutex io_lock;	/* SPI tx/rx buffers */
++	u8 *tx;
++	u8 *rx;
++	struct gpio_desc *reset_gpio;
+ 	struct regulator_bulk_data regulators[2];
+ 	struct input_dev *input;
+ 	struct touchscreen_properties prop;
+@@ -110,35 +152,213 @@ struct s6sy761_data {
+ 	u8 tx_channel;
+ };
+ 
+-/*
+- * We can't simply use i2c_smbus_read_i2c_block_data because we
+- * need to read more than 255 bytes
+- */
+-static int s6sy761_read_events(struct s6sy761_data *sdata, u16 n_events)
++static int s6sy761_i2c_read(struct s6sy761_data *sdata, u8 reg,
++			    u8 *buf, u16 len)
+ {
+-	u8 cmd = S6SY761_READ_ALL_EVENT;
++	struct i2c_client *client = sdata->client;
+ 	struct i2c_msg msgs[2] = {
+ 		{
+-			.addr	= sdata->client->addr,
++			.addr	= client->addr,
+ 			.len	= 1,
+-			.buf	= &cmd,
++			.buf	= &reg,
+ 		},
+ 		{
+-			.addr	= sdata->client->addr,
++			.addr	= client->addr,
+ 			.flags	= I2C_M_RD,
+-			.len	= (n_events * S6SY761_EVENT_SIZE),
+-			.buf	= sdata->data + S6SY761_EVENT_SIZE,
++			.len	= len,
++			.buf	= buf,
+ 		},
+ 	};
+ 	int ret;
+ 
+-	ret = i2c_transfer(sdata->client->adapter, msgs, ARRAY_SIZE(msgs));
++	ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+ 	if (ret < 0)
+ 		return ret;
+ 
+ 	return ret == ARRAY_SIZE(msgs) ? 0 : -EIO;
+ }
+ 
++static int s6sy761_i2c_write(struct s6sy761_data *sdata, u8 reg,
++			     const u8 *buf, u16 len)
++{
++	u8 msg[3];
++	int ret;
++
++	if (len > sizeof(msg) - 1)
++		return -EINVAL;
++
++	msg[0] = reg;
++	if (len)
++		memcpy(msg + 1, buf, len);
++
++	ret = i2c_master_send(sdata->client, msg, len + 1);
++	if (ret < 0)
++		return ret;
++
++	return ret == len + 1 ? 0 : -EIO;
++}
++
++static const struct s6sy761_bus_ops s6sy761_i2c_ops = {
++	.read	= s6sy761_i2c_read,
++	.write	= s6sy761_i2c_write,
++};
++
++static int s6sy761_spi_write(struct s6sy761_data *sdata, u8 reg,
++			     const u8 *buf, u16 len)
++{
++	u8 *tx = sdata->tx;
++	unsigned int n, i;
++	int ret = -EIO, retry;
++	u8 csum = 0;
++
++	if (ALIGN(S6SY761_SPI_HDR + 1 + len + 1, 4) > S6SY761_SPI_BUF_SIZE)
++		return -EINVAL;
++
++	guard(mutex)(&sdata->io_lock);
++
++	tx[0] = S6SY761_SPI_SYNC;
++	tx[1] = (len + 1) >> 8;
++	tx[2] = (len + 1) & 0xff;
++	tx[3] = 0;
++	tx[4] = 0;
++	tx[5] = reg;
++	if (len)
++		memcpy(tx + S6SY761_SPI_HDR + 1, buf, len);
++
++	n = S6SY761_SPI_HDR + 1 + len;
++	for (i = 0; i < n; i++)
++		csum += tx[i];
++	tx[n++] = csum;
++	memset(tx + n, 0, 3);
++	n = ALIGN(n, 4);
++
++	for (retry = 0; retry < S6SY761_SPI_RETRIES; retry++) {
++		ret = spi_write(sdata->spi, tx, n);
++		if (!ret)
++			return 0;
++		usleep_range(1000, 1100);
++	}
++
++	dev_err_ratelimited(sdata->dev, "write %#x failed: %d\n", reg, ret);
++	return ret;
++}
++
++/* time the controller needs to prepare a reply (downstream sec_ts) */
++static unsigned int s6sy761_spi_delay_us(u8 reg)
++{
++	switch (reg) {
++	case S6SY761_READ_ALL_EVENT:
++		return 500;
++	case S6SY761_FIRMWARE_INTEGRITY:
++		return 20000;
++	default:
++		return 100;
++	}
++}
++
++static int s6sy761_spi_read(struct s6sy761_data *sdata, u8 reg,
++			    u8 *buf, u16 len)
++{
++	unsigned int delay_us = s6sy761_spi_delay_us(reg);
++	unsigned int rlen = ALIGN(S6SY761_SPI_RD_HDR + len + 1, 4);
++	u8 *tx = sdata->tx, *rx = sdata->rx;
++	int ret = -EIO, retry;
++	unsigned int i;
++	u8 csum;
++
++	if (rlen > S6SY761_SPI_BUF_SIZE)
++		return -EINVAL;
++
++	guard(mutex)(&sdata->io_lock);
++
++	tx[0] = S6SY761_SPI_SYNC;
++	tx[1] = 0x00;
++	tx[2] = 0x01;
++	tx[3] = len >> 8;
++	tx[4] = len & 0xff;
++	tx[5] = reg;
++	for (i = 0, csum = 0; i < S6SY761_SPI_HDR + 1; i++)
++		csum += tx[i];
++	tx[6] = csum;
++	tx[7] = 0;
++
++	for (retry = 0; retry < S6SY761_SPI_RETRIES; retry++) {
++		if (retry)
++			usleep_range(1000, 1100);
++
++		ret = spi_write(sdata->spi, tx, 8);
++		if (ret)
++			continue;
++
++		fsleep(delay_us);
++
++		ret = spi_read(sdata->spi, rx, rlen);
++		if (ret)
++			continue;
++
++		for (i = 0, csum = 0; i < S6SY761_SPI_RD_HDR + len; i++)
++			csum += rx[i];
++
++		if (rx[0] != S6SY761_SPI_SYNC || rx[5] != reg ||
++		    rx[S6SY761_SPI_RD_HDR + len] != csum) {
++			dev_dbg(sdata->dev, "read %#x: bad reply %*ph\n",
++				reg, 8, rx);
++			ret = -EIO;
++			continue;
++		}
++
++		memcpy(buf, rx + S6SY761_SPI_RD_HDR, len);
++		return 0;
++	}
++
++	dev_err_ratelimited(sdata->dev, "read %#x failed: %d (%*ph)\n",
++			    reg, ret, 8, rx);
++	return ret;
++}
++
++static const struct s6sy761_bus_ops s6sy761_spi_ops = {
++	.read	= s6sy761_spi_read,
++	.write	= s6sy761_spi_write,
++};
++
++static int s6sy761_read(struct s6sy761_data *sdata, u8 reg, u8 *buf, u16 len)
++{
++	return sdata->ops->read(sdata, reg, buf, len);
++}
++
++static int s6sy761_read_byte(struct s6sy761_data *sdata, u8 reg)
++{
++	u8 val;
++	int ret;
++
++	ret = s6sy761_read(sdata, reg, &val, 1);
++
++	return ret ? ret : val;
++}
++
++static int s6sy761_write(struct s6sy761_data *sdata, u8 reg,
++			 const u8 *buf, u16 len)
++{
++	return sdata->ops->write(sdata, reg, buf, len);
++}
++
++static int s6sy761_command(struct s6sy761_data *sdata, u8 cmd)
++{
++	return s6sy761_write(sdata, cmd, NULL, 0);
++}
++
++static int s6sy761_write_byte(struct s6sy761_data *sdata, u8 reg, u8 val)
++{
++	return s6sy761_write(sdata, reg, &val, 1);
++}
++
++static int s6sy761_read_events(struct s6sy761_data *sdata, u16 n_events)
++{
++	return s6sy761_read(sdata, S6SY761_READ_ALL_EVENT,
++			    sdata->data + S6SY761_EVENT_SIZE,
++			    n_events * S6SY761_EVENT_SIZE);
++}
++
+ static void s6sy761_report_coordinates(struct s6sy761_data *sdata,
+ 				       u8 *event, u8 tid)
+ {
+@@ -226,12 +446,10 @@ static irqreturn_t s6sy761_irq_handler(int irq, void *dev)
+ 	int ret;
+ 	u8 n_events;
+ 
+-	ret = i2c_smbus_read_i2c_block_data(sdata->client,
+-					    S6SY761_READ_ONE_EVENT,
+-					    S6SY761_EVENT_SIZE,
+-					    sdata->data);
++	ret = s6sy761_read(sdata, S6SY761_READ_ONE_EVENT, sdata->data,
++			   S6SY761_EVENT_SIZE);
+ 	if (ret < 0) {
+-		dev_err(&sdata->client->dev, "failed to read events\n");
++		dev_err(sdata->dev, "failed to read events\n");
+ 		return IRQ_HANDLED;
+ 	}
+ 
+@@ -245,7 +463,7 @@ static irqreturn_t s6sy761_irq_handler(int irq, void *dev)
+ 	if (n_events) {
+ 		ret = s6sy761_read_events(sdata, n_events);
+ 		if (ret < 0) {
+-			dev_err(&sdata->client->dev, "failed to read events\n");
++			dev_err(sdata->dev, "failed to read events\n");
+ 			return IRQ_HANDLED;
+ 		}
+ 	}
+@@ -259,7 +477,7 @@ static int s6sy761_input_open(struct input_dev *dev)
+ {
+ 	struct s6sy761_data *sdata = input_get_drvdata(dev);
+ 
+-	return i2c_smbus_write_byte(sdata->client, S6SY761_SENSE_ON);
++	return s6sy761_command(sdata, S6SY761_SENSE_ON);
+ }
+ 
+ static void s6sy761_input_close(struct input_dev *dev)
+@@ -267,9 +485,9 @@ static void s6sy761_input_close(struct input_dev *dev)
+ 	struct s6sy761_data *sdata = input_get_drvdata(dev);
+ 	int ret;
+ 
+-	ret = i2c_smbus_write_byte(sdata->client, S6SY761_SENSE_OFF);
++	ret = s6sy761_command(sdata, S6SY761_SENSE_OFF);
+ 	if (ret)
+-		dev_err(&sdata->client->dev, "failed to turn off sensing\n");
++		dev_err(sdata->dev, "failed to turn off sensing\n");
+ }
+ 
+ static ssize_t s6sy761_sysfs_devid(struct device *dev,
+@@ -288,10 +506,33 @@ static struct attribute *s6sy761_sysfs_attrs[] = {
+ };
+ ATTRIBUTE_GROUPS(s6sy761_sysfs);
+ 
+-static int s6sy761_power_on(struct s6sy761_data *sdata)
++static int s6sy761_wait_boot(struct s6sy761_data *sdata)
+ {
+-	u8 buffer[S6SY761_EVENT_SIZE];
++	u8 buffer[S6SY761_EVENT_SIZE] = { };
++	int i, ret = -ENODEV;
+ 	u8 event;
++
++	for (i = 0; i < S6SY761_BOOT_POLL_COUNT; i++) {
++		ret = s6sy761_read(sdata, S6SY761_READ_ONE_EVENT, buffer,
++				   S6SY761_EVENT_SIZE);
++		if (!ret) {
++			event = (buffer[0] >> 2) & 0xf;
++			if ((event == S6SY761_EVENT_INFO ||
++			     event == S6SY761_EVENT_VENDOR_INFO) &&
++			    buffer[1] == S6SY761_INFO_BOOT_COMPLETE)
++				return 0;
++		}
++		msleep(S6SY761_BOOT_POLL_MS);
++	}
++
++	dev_err(sdata->dev, "no boot-complete event (%d, last %*ph)\n",
++		ret, S6SY761_EVENT_SIZE, buffer);
++	return -ENODEV;
++}
++
++static int s6sy761_power_on(struct s6sy761_data *sdata)
++{
++	static const u8 touch_function[2] = { S6SY761_MASK_TOUCH, 0 };
+ 	int ret;
+ 
+ 	ret = regulator_bulk_enable(ARRAY_SIZE(sdata->regulators),
+@@ -299,40 +540,32 @@ static int s6sy761_power_on(struct s6sy761_data *sdata)
+ 	if (ret)
+ 		return ret;
+ 
+-	msleep(140);
++	if (sdata->reset_gpio) {
++		gpiod_set_value_cansleep(sdata->reset_gpio, 1);
++		msleep(10);
++		gpiod_set_value_cansleep(sdata->reset_gpio, 0);
++	}
++
++	msleep(S6SY761_BOOT_DELAY_MS);
+ 
+ 	/* double check whether the touch is functional */
+-	ret = i2c_smbus_read_i2c_block_data(sdata->client,
+-					    S6SY761_READ_ONE_EVENT,
+-					    S6SY761_EVENT_SIZE,
+-					    buffer);
+-	if (ret < 0)
++	ret = s6sy761_wait_boot(sdata);
++	if (ret)
+ 		return ret;
+ 
+-	event = (buffer[0] >> 2) & 0xf;
+-
+-	if ((event != S6SY761_EVENT_INFO &&
+-	     event != S6SY761_EVENT_VENDOR_INFO) ||
+-	    buffer[1] != S6SY761_INFO_BOOT_COMPLETE) {
+-		return -ENODEV;
+-	}
+-
+-	ret = i2c_smbus_read_byte_data(sdata->client, S6SY761_BOOT_STATUS);
++	ret = s6sy761_read_byte(sdata, S6SY761_BOOT_STATUS);
+ 	if (ret < 0)
+ 		return ret;
+ 
+ 	/* for some reasons the device might be stuck in the bootloader */
+-	if (ret != S6SY761_BS_APPLICATION)
++	if (ret != S6SY761_BS_APPLICATION) {
++		dev_err(sdata->dev, "not in application mode (%#x)\n", ret);
+ 		return -ENODEV;
++	}
+ 
+-	/* enable touch functionality */
+-	ret = i2c_smbus_write_word_data(sdata->client,
+-					S6SY761_TOUCH_FUNCTION,
+-					S6SY761_MASK_TOUCH);
+-	if (ret)
+-		return ret;
+-
+-	return 0;
++	/* enable touch functionality (16 bit, little endian) */
++	return s6sy761_write(sdata, S6SY761_TOUCH_FUNCTION, touch_function,
++			     sizeof(touch_function));
+ }
+ 
+ static int s6sy761_hw_init(struct s6sy761_data *sdata,
+@@ -345,19 +578,15 @@ static int s6sy761_hw_init(struct s6sy761_data *sdata,
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = i2c_smbus_read_i2c_block_data(sdata->client,
+-					    S6SY761_DEVICE_ID,
+-					    S6SY761_DEVID_SIZE,
+-					    buffer);
++	ret = s6sy761_read(sdata, S6SY761_DEVICE_ID, buffer,
++			   S6SY761_DEVID_SIZE);
+ 	if (ret < 0)
+ 		return ret;
+ 
+ 	sdata->devid = get_unaligned_be16(buffer + 1);
+ 
+-	ret = i2c_smbus_read_i2c_block_data(sdata->client,
+-					    S6SY761_PANEL_INFO,
+-					    S6SY761_PANEL_ID_SIZE,
+-					    buffer);
++	ret = s6sy761_read(sdata, S6SY761_PANEL_INFO, buffer,
++			   S6SY761_PANEL_ID_SIZE);
+ 	if (ret < 0)
+ 		return ret;
+ 
+@@ -367,12 +596,16 @@ static int s6sy761_hw_init(struct s6sy761_data *sdata,
+ 	/* if no tx channels defined, at least keep one */
+ 	sdata->tx_channel = max_t(u8, buffer[8], 1);
+ 
+-	ret = i2c_smbus_read_byte_data(sdata->client,
+-				       S6SY761_FIRMWARE_INTEGRITY);
++	ret = s6sy761_read_byte(sdata, S6SY761_FIRMWARE_INTEGRITY);
+ 	if (ret < 0)
+ 		return ret;
+-	else if (ret != S6SY761_FW_OK)
++	else if (!(ret & S6SY761_FW_OK)) {
++		dev_err(sdata->dev, "firmware integrity %#x\n", ret);
+ 		return -ENODEV;
++	}
++
++	dev_info(sdata->dev, "device id %#x, %ux%u, %u tx channels\n",
++		 sdata->devid, *max_x, *max_y, sdata->tx_channel);
+ 
+ 	return 0;
+ }
+@@ -381,38 +614,32 @@ static void s6sy761_power_off(void *data)
+ {
+ 	struct s6sy761_data *sdata = data;
+ 
+-	disable_irq(sdata->client->irq);
++	disable_irq(sdata->irq);
+ 	regulator_bulk_disable(ARRAY_SIZE(sdata->regulators),
+ 						sdata->regulators);
+ }
+ 
+-static int s6sy761_probe(struct i2c_client *client)
++static int s6sy761_probe_common(struct s6sy761_data *sdata, u16 bustype)
+ {
+-	struct s6sy761_data *sdata;
++	struct device *dev = sdata->dev;
+ 	unsigned int max_x, max_y;
+ 	int err;
+ 
+-	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C |
+-						I2C_FUNC_SMBUS_BYTE_DATA |
+-						I2C_FUNC_SMBUS_I2C_BLOCK))
+-		return -ENODEV;
+-
+-	sdata = devm_kzalloc(&client->dev, sizeof(*sdata), GFP_KERNEL);
+-	if (!sdata)
+-		return -ENOMEM;
+-
+-	i2c_set_clientdata(client, sdata);
+-	sdata->client = client;
+-
+ 	sdata->regulators[S6SY761_REGULATOR_VDD].supply = "vdd";
+ 	sdata->regulators[S6SY761_REGULATOR_AVDD].supply = "avdd";
+-	err = devm_regulator_bulk_get(&client->dev,
+-				      ARRAY_SIZE(sdata->regulators),
++	err = devm_regulator_bulk_get(dev, ARRAY_SIZE(sdata->regulators),
+ 				      sdata->regulators);
+ 	if (err)
+ 		return err;
+ 
+-	err = devm_add_action_or_reset(&client->dev, s6sy761_power_off, sdata);
++	/* asserted (in reset) until power-on */
++	sdata->reset_gpio = devm_gpiod_get_optional(dev, "reset",
++						    GPIOD_OUT_HIGH);
++	if (IS_ERR(sdata->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(sdata->reset_gpio),
++				     "failed to get reset gpio\n");
++
++	err = devm_add_action_or_reset(dev, s6sy761_power_off, sdata);
+ 	if (err)
+ 		return err;
+ 
+@@ -420,12 +647,12 @@ static int s6sy761_probe(struct i2c_client *client)
+ 	if (err)
+ 		return err;
+ 
+-	sdata->input = devm_input_allocate_device(&client->dev);
++	sdata->input = devm_input_allocate_device(dev);
+ 	if (!sdata->input)
+ 		return -ENOMEM;
+ 
+ 	sdata->input->name = S6SY761_DEV_NAME;
+-	sdata->input->id.bustype = BUS_I2C;
++	sdata->input->id.bustype = bustype;
+ 	sdata->input->open = s6sy761_input_open;
+ 	sdata->input->close = s6sy761_input_close;
+ 
+@@ -439,7 +666,7 @@ static int s6sy761_probe(struct i2c_client *client)
+ 
+ 	if (!input_abs_get_max(sdata->input, ABS_X) ||
+ 	    !input_abs_get_max(sdata->input, ABS_Y)) {
+-		dev_warn(&client->dev, "the axis have not been set\n");
++		dev_warn(dev, "the axis have not been set\n");
+ 	}
+ 
+ 	err = input_mt_init_slots(sdata->input, sdata->tx_channel,
+@@ -453,37 +680,83 @@ static int s6sy761_probe(struct i2c_client *client)
+ 	if (err)
+ 		return err;
+ 
+-	err = devm_request_threaded_irq(&client->dev, client->irq, NULL,
++	err = devm_request_threaded_irq(dev, sdata->irq, NULL,
+ 					s6sy761_irq_handler,
+ 					IRQF_TRIGGER_LOW | IRQF_ONESHOT,
+ 					"s6sy761_irq", sdata);
+ 	if (err)
+ 		return err;
+ 
+-	pm_runtime_enable(&client->dev);
++	return devm_pm_runtime_enable(dev);
++}
++
++static int s6sy761_i2c_probe(struct i2c_client *client)
++{
++	struct s6sy761_data *sdata;
+ 
+-	return 0;
++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
++		return -ENODEV;
++
++	sdata = devm_kzalloc(&client->dev, sizeof(*sdata), GFP_KERNEL);
++	if (!sdata)
++		return -ENOMEM;
++
++	i2c_set_clientdata(client, sdata);
++	sdata->dev = &client->dev;
++	sdata->irq = client->irq;
++	sdata->client = client;
++	sdata->ops = &s6sy761_i2c_ops;
++
++	return s6sy761_probe_common(sdata, BUS_I2C);
+ }
+ 
+-static void s6sy761_remove(struct i2c_client *client)
++static int s6sy761_spi_probe(struct spi_device *spi)
+ {
+-	pm_runtime_disable(&client->dev);
++	struct device *dev = &spi->dev;
++	struct s6sy761_data *sdata;
++	int err;
++
++	sdata = devm_kzalloc(dev, sizeof(*sdata), GFP_KERNEL);
++	if (!sdata)
++		return -ENOMEM;
++
++	sdata->tx = devm_kzalloc(dev, S6SY761_SPI_BUF_SIZE, GFP_KERNEL);
++	sdata->rx = devm_kzalloc(dev, S6SY761_SPI_BUF_SIZE, GFP_KERNEL);
++	if (!sdata->tx || !sdata->rx)
++		return -ENOMEM;
++
++	err = devm_mutex_init(dev, &sdata->io_lock);
++	if (err)
++		return err;
++
++	spi->bits_per_word = 8;
++	err = spi_setup(spi);
++	if (err)
++		return err;
++
++	spi_set_drvdata(spi, sdata);
++	sdata->dev = dev;
++	sdata->irq = spi->irq;
++	sdata->spi = spi;
++	sdata->ops = &s6sy761_spi_ops;
++
++	return s6sy761_probe_common(sdata, BUS_SPI);
+ }
+ 
+ static int s6sy761_runtime_suspend(struct device *dev)
+ {
+ 	struct s6sy761_data *sdata = dev_get_drvdata(dev);
+ 
+-	return i2c_smbus_write_byte_data(sdata->client,
+-				S6SY761_APPLICATION_MODE, S6SY761_APP_SLEEP);
++	return s6sy761_write_byte(sdata, S6SY761_APPLICATION_MODE,
++				  S6SY761_APP_SLEEP);
+ }
+ 
+ static int s6sy761_runtime_resume(struct device *dev)
+ {
+ 	struct s6sy761_data *sdata = dev_get_drvdata(dev);
+ 
+-	return i2c_smbus_write_byte_data(sdata->client,
+-				S6SY761_APPLICATION_MODE, S6SY761_APP_NORMAL);
++	return s6sy761_write_byte(sdata, S6SY761_APPLICATION_MODE,
++				  S6SY761_APP_NORMAL);
+ }
+ 
+ static int s6sy761_suspend(struct device *dev)
+@@ -504,14 +777,14 @@ static int s6sy761_resume(struct device *dev)
+ 	if (err)
+ 		return err;
+ 
+-	enable_irq(sdata->client->irq);
++	enable_irq(sdata->irq);
+ 
+ 	guard(mutex)(&sdata->input->mutex);
+ 
+ 	if (!input_device_enabled(sdata->input))
+ 		return 0;
+ 
+-	err = i2c_smbus_write_byte(sdata->client, S6SY761_SENSE_ON);
++	err = s6sy761_command(sdata, S6SY761_SENSE_ON);
+ 
+ 	return err;
+ }
+@@ -542,12 +815,49 @@ static struct i2c_driver s6sy761_driver = {
+ 		.of_match_table = of_match_ptr(s6sy761_of_match),
+ 		.pm = pm_ptr(&s6sy761_pm_ops),
+ 	},
+-	.probe = s6sy761_probe,
+-	.remove = s6sy761_remove,
++	.probe = s6sy761_i2c_probe,
+ 	.id_table = s6sy761_id,
+ };
+ 
+-module_i2c_driver(s6sy761_driver);
++static const struct spi_device_id s6sy761_spi_id[] = {
++	{ .name = "s6sy761" },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, s6sy761_spi_id);
++
++static struct spi_driver s6sy761_spi_driver = {
++	.driver = {
++		.name = S6SY761_DEV_NAME,
++		.dev_groups = s6sy761_sysfs_groups,
++		.of_match_table = of_match_ptr(s6sy761_of_match),
++		.pm = pm_ptr(&s6sy761_pm_ops),
++	},
++	.probe = s6sy761_spi_probe,
++	.id_table = s6sy761_spi_id,
++};
++
++static int __init s6sy761_init(void)
++{
++	int ret;
++
++	ret = i2c_add_driver(&s6sy761_driver);
++	if (ret)
++		return ret;
++
++	ret = spi_register_driver(&s6sy761_spi_driver);
++	if (ret)
++		i2c_del_driver(&s6sy761_driver);
++
++	return ret;
++}
++module_init(s6sy761_init);
++
++static void __exit s6sy761_exit(void)
++{
++	spi_unregister_driver(&s6sy761_spi_driver);
++	i2c_del_driver(&s6sy761_driver);
++}
++module_exit(s6sy761_exit);
+ 
+ MODULE_AUTHOR("Andi Shyti <andi.shyti@samsung.com>");
+ MODULE_DESCRIPTION("Samsung S6SY761 Touch Screen");
+diff --git a/out/0001-LOCAL-Input-s6sy761-add-an-SPI-transport.patch b/out/0001-LOCAL-Input-s6sy761-add-an-SPI-transport.patch
+new file mode 100644
+index 0000000..ffd5618
+--- /dev/null
++++ b/out/0001-LOCAL-Input-s6sy761-add-an-SPI-transport.patch
+@@ -0,0 +1,755 @@
++From 87196608f9eb6385182bbd349e4c07910bd4b3ea Mon Sep 17 00:00:00 2001
++From: pixel5 <pixel5@localhost>
++Date: Fri, 20 Nov 2026 23:40:00 +0000
++Subject: [PATCH] LOCAL: Input: s6sy761 - add an SPI transport
++
++The Pixel 5 touch controller, a Samsung S6SY79x, sits on SPI (QUP0 SE0)
++and speaks the same command set and event format as the S6SY761: sense
++on 0x10, events 0x60/0x61, boot status 0x55, panel info 0x23, power
++mode 0xe4. Only the bus framing differs. Google's downstream driver
++(redbull kernel, drivers/input/touchscreen/sec_touch/sec_ts.c, Samsung,
++GPL-2.0) wraps every register access in a sync byte, 16-bit lengths
++and a byte-sum checksum, padded to 4 bytes; a read is a request
++transfer, a short delay, then a separate read of the reply.
++
++This moves the driver's bus access behind two callbacks (read and
++write a register), keeps the I2C path byte-for-byte equivalent, and
++adds an SPI driver with that framing. Also: an optional reset GPIO
++(pulsed at power-on, as downstream does) and polling for the
++boot-complete event (up to 1 s) instead of a single read after 140 ms.
++---
++ drivers/input/touchscreen/Kconfig   |   5 +-
++ drivers/input/touchscreen/s6sy761.c | 483 ++++++++++++++++++++++------
++ 2 files changed, 393 insertions(+), 95 deletions(-)
++
++diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
++index 9b9ae8a..e75a3b4 100644
++--- a/drivers/input/touchscreen/Kconfig
+++++ b/drivers/input/touchscreen/Kconfig
++@@ -529,9 +529,10 @@ config TOUCHSCREEN_IPROC
++ 
++ config TOUCHSCREEN_S6SY761
++ 	tristate "Samsung S6SY761 Touchscreen driver"
++-	depends on I2C
+++	depends on I2C && SPI_MASTER
++ 	help
++-	  Say Y if you have the Samsung S6SY761 driver
+++	  Say Y if you have the Samsung S6SY761 driver, on I2C or on SPI
+++	  (S6SY79x, Google Pixel 5)
++ 
++ 	  If unsure, say N
++ 
++diff --git a/drivers/input/touchscreen/s6sy761.c b/drivers/input/touchscreen/s6sy761.c
++index 1bd4ddf..6a98e55 100644
++--- a/drivers/input/touchscreen/s6sy761.c
+++++ b/drivers/input/touchscreen/s6sy761.c
++@@ -3,9 +3,14 @@
++ //
++ // Copyright (c) 2017 Samsung Electronics Co., Ltd.
++ // Copyright (c) 2017 Andi Shyti <andi@etezian.org>
+++//
+++// SPI transport: the framing of Samsung's sec_ts driver in Google's redbull
+++// kernel (drivers/input/touchscreen/sec_touch, GPL-2.0), used by the S6SY79x
+++// of the Pixel 5.
++ 
++ #include <linux/unaligned.h>
++ #include <linux/delay.h>
+++#include <linux/gpio/consumer.h>
++ #include <linux/i2c.h>
++ #include <linux/input/mt.h>
++ #include <linux/input/touchscreen.h>
++@@ -14,6 +19,7 @@
++ #include <linux/module.h>
++ #include <linux/pm_runtime.h>
++ #include <linux/regulator/consumer.h>
+++#include <linux/spi/spi.h>
++ 
++ /* commands */
++ #define S6SY761_SENSE_ON		0x10
++@@ -93,13 +99,49 @@
++ 
++ #define S6SY761_DEV_NAME	"s6sy761"
++ 
+++/* after power-on/reset: poll for the boot-complete event */
+++#define S6SY761_BOOT_DELAY_MS		70
+++#define S6SY761_BOOT_POLL_MS		20
+++#define S6SY761_BOOT_POLL_COUNT		50
+++
+++/*
+++ * SPI framing. Write: sync, 16-bit length of reg + data, 16-bit 0, reg,
+++ * data, checksum (byte sum). Read request: sync, 16-bit 1, 16-bit length,
+++ * reg, checksum; then, after a short delay, a separate read of sync,
+++ * lengths, reg, status, data, checksum (over all bytes before it).
+++ * Every transfer is zero-padded to a multiple of 4 bytes.
+++ */
+++#define S6SY761_SPI_SYNC		0xaa
+++#define S6SY761_SPI_HDR			5
+++#define S6SY761_SPI_RD_HDR		7
+++#define S6SY761_SPI_BUF_SIZE		ALIGN(S6SY761_SPI_RD_HDR + \
+++					      S6SY761_EVENT_SIZE * \
+++					      S6SY761_EVENT_COUNT + 1, 4)
+++#define S6SY761_SPI_RETRIES		3
+++
++ enum s6sy761_regulators {
++ 	S6SY761_REGULATOR_VDD,
++ 	S6SY761_REGULATOR_AVDD,
++ };
++ 
+++struct s6sy761_data;
+++
+++struct s6sy761_bus_ops {
+++	int (*read)(struct s6sy761_data *sdata, u8 reg, u8 *buf, u16 len);
+++	int (*write)(struct s6sy761_data *sdata, u8 reg, const u8 *buf,
+++		     u16 len);
+++};
+++
++ struct s6sy761_data {
+++	struct device *dev;
+++	int irq;
+++	const struct s6sy761_bus_ops *ops;
++ 	struct i2c_client *client;
+++	struct spi_device *spi;
+++	struct mutex io_lock;	/* SPI tx/rx buffers */
+++	u8 *tx;
+++	u8 *rx;
+++	struct gpio_desc *reset_gpio;
++ 	struct regulator_bulk_data regulators[2];
++ 	struct input_dev *input;
++ 	struct touchscreen_properties prop;
++@@ -110,35 +152,200 @@ struct s6sy761_data {
++ 	u8 tx_channel;
++ };
++ 
++-/*
++- * We can't simply use i2c_smbus_read_i2c_block_data because we
++- * need to read more than 255 bytes
++- */
++-static int s6sy761_read_events(struct s6sy761_data *sdata, u16 n_events)
+++static int s6sy761_i2c_read(struct s6sy761_data *sdata, u8 reg,
+++			    u8 *buf, u16 len)
++ {
++-	u8 cmd = S6SY761_READ_ALL_EVENT;
+++	struct i2c_client *client = sdata->client;
++ 	struct i2c_msg msgs[2] = {
++ 		{
++-			.addr	= sdata->client->addr,
+++			.addr	= client->addr,
++ 			.len	= 1,
++-			.buf	= &cmd,
+++			.buf	= &reg,
++ 		},
++ 		{
++-			.addr	= sdata->client->addr,
+++			.addr	= client->addr,
++ 			.flags	= I2C_M_RD,
++-			.len	= (n_events * S6SY761_EVENT_SIZE),
++-			.buf	= sdata->data + S6SY761_EVENT_SIZE,
+++			.len	= len,
+++			.buf	= buf,
++ 		},
++ 	};
++ 	int ret;
++ 
++-	ret = i2c_transfer(sdata->client->adapter, msgs, ARRAY_SIZE(msgs));
+++	ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
++ 	if (ret < 0)
++ 		return ret;
++ 
++ 	return ret == ARRAY_SIZE(msgs) ? 0 : -EIO;
++ }
++ 
+++static int s6sy761_i2c_write(struct s6sy761_data *sdata, u8 reg,
+++			     const u8 *buf, u16 len)
+++{
+++	u8 msg[3];
+++	int ret;
+++
+++	if (len > sizeof(msg) - 1)
+++		return -EINVAL;
+++
+++	msg[0] = reg;
+++	if (len)
+++		memcpy(msg + 1, buf, len);
+++
+++	ret = i2c_master_send(sdata->client, msg, len + 1);
+++	if (ret < 0)
+++		return ret;
+++
+++	return ret == len + 1 ? 0 : -EIO;
+++}
+++
+++static const struct s6sy761_bus_ops s6sy761_i2c_ops = {
+++	.read	= s6sy761_i2c_read,
+++	.write	= s6sy761_i2c_write,
+++};
+++
+++static int s6sy761_spi_write(struct s6sy761_data *sdata, u8 reg,
+++			     const u8 *buf, u16 len)
+++{
+++	u8 *tx = sdata->tx;
+++	unsigned int n, i;
+++	int ret = -EIO, retry;
+++	u8 csum = 0;
+++
+++	if (ALIGN(S6SY761_SPI_HDR + 1 + len + 1, 4) > S6SY761_SPI_BUF_SIZE)
+++		return -EINVAL;
+++
+++	guard(mutex)(&sdata->io_lock);
+++
+++	tx[0] = S6SY761_SPI_SYNC;
+++	tx[1] = (len + 1) >> 8;
+++	tx[2] = (len + 1) & 0xff;
+++	tx[3] = 0;
+++	tx[4] = 0;
+++	tx[5] = reg;
+++	if (len)
+++		memcpy(tx + S6SY761_SPI_HDR + 1, buf, len);
+++
+++	n = S6SY761_SPI_HDR + 1 + len;
+++	for (i = 0; i < n; i++)
+++		csum += tx[i];
+++	tx[n++] = csum;
+++	memset(tx + n, 0, 3);
+++	n = ALIGN(n, 4);
+++
+++	for (retry = 0; retry < S6SY761_SPI_RETRIES; retry++) {
+++		ret = spi_write(sdata->spi, tx, n);
+++		if (!ret)
+++			return 0;
+++		usleep_range(1000, 1100);
+++	}
+++
+++	dev_err_ratelimited(sdata->dev, "write %#x failed: %d\n", reg, ret);
+++	return ret;
+++}
+++
+++static int s6sy761_spi_read(struct s6sy761_data *sdata, u8 reg,
+++			    u8 *buf, u16 len)
+++{
+++	unsigned int delay_us = reg == S6SY761_READ_ALL_EVENT ? 500 : 100;
+++	unsigned int rlen = ALIGN(S6SY761_SPI_RD_HDR + len + 1, 4);
+++	u8 *tx = sdata->tx, *rx = sdata->rx;
+++	int ret = -EIO, retry;
+++	unsigned int i;
+++	u8 csum;
+++
+++	if (rlen > S6SY761_SPI_BUF_SIZE)
+++		return -EINVAL;
+++
+++	guard(mutex)(&sdata->io_lock);
+++
+++	tx[0] = S6SY761_SPI_SYNC;
+++	tx[1] = 0x00;
+++	tx[2] = 0x01;
+++	tx[3] = len >> 8;
+++	tx[4] = len & 0xff;
+++	tx[5] = reg;
+++	for (i = 0, csum = 0; i < S6SY761_SPI_HDR + 1; i++)
+++		csum += tx[i];
+++	tx[6] = csum;
+++	tx[7] = 0;
+++
+++	for (retry = 0; retry < S6SY761_SPI_RETRIES; retry++) {
+++		if (retry)
+++			usleep_range(1000, 1100);
+++
+++		ret = spi_write(sdata->spi, tx, 8);
+++		if (ret)
+++			continue;
+++
+++		usleep_range(delay_us, delay_us + 50);
+++
+++		ret = spi_read(sdata->spi, rx, rlen);
+++		if (ret)
+++			continue;
+++
+++		for (i = 0, csum = 0; i < S6SY761_SPI_RD_HDR + len; i++)
+++			csum += rx[i];
+++
+++		if (rx[0] != S6SY761_SPI_SYNC || rx[5] != reg ||
+++		    rx[S6SY761_SPI_RD_HDR + len] != csum) {
+++			dev_dbg(sdata->dev, "read %#x: bad reply %*ph\n",
+++				reg, 8, rx);
+++			ret = -EIO;
+++			continue;
+++		}
+++
+++		memcpy(buf, rx + S6SY761_SPI_RD_HDR, len);
+++		return 0;
+++	}
+++
+++	dev_err_ratelimited(sdata->dev, "read %#x failed: %d (%*ph)\n",
+++			    reg, ret, 8, rx);
+++	return ret;
+++}
+++
+++static const struct s6sy761_bus_ops s6sy761_spi_ops = {
+++	.read	= s6sy761_spi_read,
+++	.write	= s6sy761_spi_write,
+++};
+++
+++static int s6sy761_read(struct s6sy761_data *sdata, u8 reg, u8 *buf, u16 len)
+++{
+++	return sdata->ops->read(sdata, reg, buf, len);
+++}
+++
+++static int s6sy761_read_byte(struct s6sy761_data *sdata, u8 reg)
+++{
+++	u8 val;
+++	int ret;
+++
+++	ret = s6sy761_read(sdata, reg, &val, 1);
+++
+++	return ret ? ret : val;
+++}
+++
+++static int s6sy761_write(struct s6sy761_data *sdata, u8 reg,
+++			 const u8 *buf, u16 len)
+++{
+++	return sdata->ops->write(sdata, reg, buf, len);
+++}
+++
+++static int s6sy761_command(struct s6sy761_data *sdata, u8 cmd)
+++{
+++	return s6sy761_write(sdata, cmd, NULL, 0);
+++}
+++
+++static int s6sy761_write_byte(struct s6sy761_data *sdata, u8 reg, u8 val)
+++{
+++	return s6sy761_write(sdata, reg, &val, 1);
+++}
+++
+++static int s6sy761_read_events(struct s6sy761_data *sdata, u16 n_events)
+++{
+++	return s6sy761_read(sdata, S6SY761_READ_ALL_EVENT,
+++			    sdata->data + S6SY761_EVENT_SIZE,
+++			    n_events * S6SY761_EVENT_SIZE);
+++}
+++
++ static void s6sy761_report_coordinates(struct s6sy761_data *sdata,
++ 				       u8 *event, u8 tid)
++ {
++@@ -226,12 +433,10 @@ static irqreturn_t s6sy761_irq_handler(int irq, void *dev)
++ 	int ret;
++ 	u8 n_events;
++ 
++-	ret = i2c_smbus_read_i2c_block_data(sdata->client,
++-					    S6SY761_READ_ONE_EVENT,
++-					    S6SY761_EVENT_SIZE,
++-					    sdata->data);
+++	ret = s6sy761_read(sdata, S6SY761_READ_ONE_EVENT, sdata->data,
+++			   S6SY761_EVENT_SIZE);
++ 	if (ret < 0) {
++-		dev_err(&sdata->client->dev, "failed to read events\n");
+++		dev_err(sdata->dev, "failed to read events\n");
++ 		return IRQ_HANDLED;
++ 	}
++ 
++@@ -245,7 +450,7 @@ static irqreturn_t s6sy761_irq_handler(int irq, void *dev)
++ 	if (n_events) {
++ 		ret = s6sy761_read_events(sdata, n_events);
++ 		if (ret < 0) {
++-			dev_err(&sdata->client->dev, "failed to read events\n");
+++			dev_err(sdata->dev, "failed to read events\n");
++ 			return IRQ_HANDLED;
++ 		}
++ 	}
++@@ -259,7 +464,7 @@ static int s6sy761_input_open(struct input_dev *dev)
++ {
++ 	struct s6sy761_data *sdata = input_get_drvdata(dev);
++ 
++-	return i2c_smbus_write_byte(sdata->client, S6SY761_SENSE_ON);
+++	return s6sy761_command(sdata, S6SY761_SENSE_ON);
++ }
++ 
++ static void s6sy761_input_close(struct input_dev *dev)
++@@ -267,9 +472,9 @@ static void s6sy761_input_close(struct input_dev *dev)
++ 	struct s6sy761_data *sdata = input_get_drvdata(dev);
++ 	int ret;
++ 
++-	ret = i2c_smbus_write_byte(sdata->client, S6SY761_SENSE_OFF);
+++	ret = s6sy761_command(sdata, S6SY761_SENSE_OFF);
++ 	if (ret)
++-		dev_err(&sdata->client->dev, "failed to turn off sensing\n");
+++		dev_err(sdata->dev, "failed to turn off sensing\n");
++ }
++ 
++ static ssize_t s6sy761_sysfs_devid(struct device *dev,
++@@ -288,10 +493,33 @@ static struct attribute *s6sy761_sysfs_attrs[] = {
++ };
++ ATTRIBUTE_GROUPS(s6sy761_sysfs);
++ 
++-static int s6sy761_power_on(struct s6sy761_data *sdata)
+++static int s6sy761_wait_boot(struct s6sy761_data *sdata)
++ {
++-	u8 buffer[S6SY761_EVENT_SIZE];
+++	u8 buffer[S6SY761_EVENT_SIZE] = { };
+++	int i, ret = -ENODEV;
++ 	u8 event;
+++
+++	for (i = 0; i < S6SY761_BOOT_POLL_COUNT; i++) {
+++		ret = s6sy761_read(sdata, S6SY761_READ_ONE_EVENT, buffer,
+++				   S6SY761_EVENT_SIZE);
+++		if (!ret) {
+++			event = (buffer[0] >> 2) & 0xf;
+++			if ((event == S6SY761_EVENT_INFO ||
+++			     event == S6SY761_EVENT_VENDOR_INFO) &&
+++			    buffer[1] == S6SY761_INFO_BOOT_COMPLETE)
+++				return 0;
+++		}
+++		msleep(S6SY761_BOOT_POLL_MS);
+++	}
+++
+++	dev_err(sdata->dev, "no boot-complete event (%d, last %*ph)\n",
+++		ret, S6SY761_EVENT_SIZE, buffer);
+++	return -ENODEV;
+++}
+++
+++static int s6sy761_power_on(struct s6sy761_data *sdata)
+++{
+++	static const u8 touch_function[2] = { S6SY761_MASK_TOUCH, 0 };
++ 	int ret;
++ 
++ 	ret = regulator_bulk_enable(ARRAY_SIZE(sdata->regulators),
++@@ -299,40 +527,32 @@ static int s6sy761_power_on(struct s6sy761_data *sdata)
++ 	if (ret)
++ 		return ret;
++ 
++-	msleep(140);
+++	if (sdata->reset_gpio) {
+++		gpiod_set_value_cansleep(sdata->reset_gpio, 1);
+++		msleep(10);
+++		gpiod_set_value_cansleep(sdata->reset_gpio, 0);
+++	}
+++
+++	msleep(S6SY761_BOOT_DELAY_MS);
++ 
++ 	/* double check whether the touch is functional */
++-	ret = i2c_smbus_read_i2c_block_data(sdata->client,
++-					    S6SY761_READ_ONE_EVENT,
++-					    S6SY761_EVENT_SIZE,
++-					    buffer);
++-	if (ret < 0)
+++	ret = s6sy761_wait_boot(sdata);
+++	if (ret)
++ 		return ret;
++ 
++-	event = (buffer[0] >> 2) & 0xf;
++-
++-	if ((event != S6SY761_EVENT_INFO &&
++-	     event != S6SY761_EVENT_VENDOR_INFO) ||
++-	    buffer[1] != S6SY761_INFO_BOOT_COMPLETE) {
++-		return -ENODEV;
++-	}
++-
++-	ret = i2c_smbus_read_byte_data(sdata->client, S6SY761_BOOT_STATUS);
+++	ret = s6sy761_read_byte(sdata, S6SY761_BOOT_STATUS);
++ 	if (ret < 0)
++ 		return ret;
++ 
++ 	/* for some reasons the device might be stuck in the bootloader */
++-	if (ret != S6SY761_BS_APPLICATION)
+++	if (ret != S6SY761_BS_APPLICATION) {
+++		dev_err(sdata->dev, "not in application mode (%#x)\n", ret);
++ 		return -ENODEV;
+++	}
++ 
++-	/* enable touch functionality */
++-	ret = i2c_smbus_write_word_data(sdata->client,
++-					S6SY761_TOUCH_FUNCTION,
++-					S6SY761_MASK_TOUCH);
++-	if (ret)
++-		return ret;
++-
++-	return 0;
+++	/* enable touch functionality (16 bit, little endian) */
+++	return s6sy761_write(sdata, S6SY761_TOUCH_FUNCTION, touch_function,
+++			     sizeof(touch_function));
++ }
++ 
++ static int s6sy761_hw_init(struct s6sy761_data *sdata,
++@@ -345,19 +565,15 @@ static int s6sy761_hw_init(struct s6sy761_data *sdata,
++ 	if (ret)
++ 		return ret;
++ 
++-	ret = i2c_smbus_read_i2c_block_data(sdata->client,
++-					    S6SY761_DEVICE_ID,
++-					    S6SY761_DEVID_SIZE,
++-					    buffer);
+++	ret = s6sy761_read(sdata, S6SY761_DEVICE_ID, buffer,
+++			   S6SY761_DEVID_SIZE);
++ 	if (ret < 0)
++ 		return ret;
++ 
++ 	sdata->devid = get_unaligned_be16(buffer + 1);
++ 
++-	ret = i2c_smbus_read_i2c_block_data(sdata->client,
++-					    S6SY761_PANEL_INFO,
++-					    S6SY761_PANEL_ID_SIZE,
++-					    buffer);
+++	ret = s6sy761_read(sdata, S6SY761_PANEL_INFO, buffer,
+++			   S6SY761_PANEL_ID_SIZE);
++ 	if (ret < 0)
++ 		return ret;
++ 
++@@ -367,12 +583,16 @@ static int s6sy761_hw_init(struct s6sy761_data *sdata,
++ 	/* if no tx channels defined, at least keep one */
++ 	sdata->tx_channel = max_t(u8, buffer[8], 1);
++ 
++-	ret = i2c_smbus_read_byte_data(sdata->client,
++-				       S6SY761_FIRMWARE_INTEGRITY);
+++	ret = s6sy761_read_byte(sdata, S6SY761_FIRMWARE_INTEGRITY);
++ 	if (ret < 0)
++ 		return ret;
++-	else if (ret != S6SY761_FW_OK)
+++	else if (!(ret & S6SY761_FW_OK)) {
+++		dev_err(sdata->dev, "firmware integrity %#x\n", ret);
++ 		return -ENODEV;
+++	}
+++
+++	dev_info(sdata->dev, "device id %#x, %ux%u, %u tx channels\n",
+++		 sdata->devid, *max_x, *max_y, sdata->tx_channel);
++ 
++ 	return 0;
++ }
++@@ -381,38 +601,32 @@ static void s6sy761_power_off(void *data)
++ {
++ 	struct s6sy761_data *sdata = data;
++ 
++-	disable_irq(sdata->client->irq);
+++	disable_irq(sdata->irq);
++ 	regulator_bulk_disable(ARRAY_SIZE(sdata->regulators),
++ 						sdata->regulators);
++ }
++ 
++-static int s6sy761_probe(struct i2c_client *client)
+++static int s6sy761_probe_common(struct s6sy761_data *sdata, u16 bustype)
++ {
++-	struct s6sy761_data *sdata;
+++	struct device *dev = sdata->dev;
++ 	unsigned int max_x, max_y;
++ 	int err;
++ 
++-	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C |
++-						I2C_FUNC_SMBUS_BYTE_DATA |
++-						I2C_FUNC_SMBUS_I2C_BLOCK))
++-		return -ENODEV;
++-
++-	sdata = devm_kzalloc(&client->dev, sizeof(*sdata), GFP_KERNEL);
++-	if (!sdata)
++-		return -ENOMEM;
++-
++-	i2c_set_clientdata(client, sdata);
++-	sdata->client = client;
++-
++ 	sdata->regulators[S6SY761_REGULATOR_VDD].supply = "vdd";
++ 	sdata->regulators[S6SY761_REGULATOR_AVDD].supply = "avdd";
++-	err = devm_regulator_bulk_get(&client->dev,
++-				      ARRAY_SIZE(sdata->regulators),
+++	err = devm_regulator_bulk_get(dev, ARRAY_SIZE(sdata->regulators),
++ 				      sdata->regulators);
++ 	if (err)
++ 		return err;
++ 
++-	err = devm_add_action_or_reset(&client->dev, s6sy761_power_off, sdata);
+++	/* asserted (in reset) until power-on */
+++	sdata->reset_gpio = devm_gpiod_get_optional(dev, "reset",
+++						    GPIOD_OUT_HIGH);
+++	if (IS_ERR(sdata->reset_gpio))
+++		return dev_err_probe(dev, PTR_ERR(sdata->reset_gpio),
+++				     "failed to get reset gpio\n");
+++
+++	err = devm_add_action_or_reset(dev, s6sy761_power_off, sdata);
++ 	if (err)
++ 		return err;
++ 
++@@ -420,12 +634,12 @@ static int s6sy761_probe(struct i2c_client *client)
++ 	if (err)
++ 		return err;
++ 
++-	sdata->input = devm_input_allocate_device(&client->dev);
+++	sdata->input = devm_input_allocate_device(dev);
++ 	if (!sdata->input)
++ 		return -ENOMEM;
++ 
++ 	sdata->input->name = S6SY761_DEV_NAME;
++-	sdata->input->id.bustype = BUS_I2C;
+++	sdata->input->id.bustype = bustype;
++ 	sdata->input->open = s6sy761_input_open;
++ 	sdata->input->close = s6sy761_input_close;
++ 
++@@ -439,7 +653,7 @@ static int s6sy761_probe(struct i2c_client *client)
++ 
++ 	if (!input_abs_get_max(sdata->input, ABS_X) ||
++ 	    !input_abs_get_max(sdata->input, ABS_Y)) {
++-		dev_warn(&client->dev, "the axis have not been set\n");
+++		dev_warn(dev, "the axis have not been set\n");
++ 	}
++ 
++ 	err = input_mt_init_slots(sdata->input, sdata->tx_channel,
++@@ -453,37 +667,83 @@ static int s6sy761_probe(struct i2c_client *client)
++ 	if (err)
++ 		return err;
++ 
++-	err = devm_request_threaded_irq(&client->dev, client->irq, NULL,
+++	err = devm_request_threaded_irq(dev, sdata->irq, NULL,
++ 					s6sy761_irq_handler,
++ 					IRQF_TRIGGER_LOW | IRQF_ONESHOT,
++ 					"s6sy761_irq", sdata);
++ 	if (err)
++ 		return err;
++ 
++-	pm_runtime_enable(&client->dev);
+++	return devm_pm_runtime_enable(dev);
+++}
++ 
++-	return 0;
+++static int s6sy761_i2c_probe(struct i2c_client *client)
+++{
+++	struct s6sy761_data *sdata;
+++
+++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
+++		return -ENODEV;
+++
+++	sdata = devm_kzalloc(&client->dev, sizeof(*sdata), GFP_KERNEL);
+++	if (!sdata)
+++		return -ENOMEM;
+++
+++	i2c_set_clientdata(client, sdata);
+++	sdata->dev = &client->dev;
+++	sdata->irq = client->irq;
+++	sdata->client = client;
+++	sdata->ops = &s6sy761_i2c_ops;
+++
+++	return s6sy761_probe_common(sdata, BUS_I2C);
++ }
++ 
++-static void s6sy761_remove(struct i2c_client *client)
+++static int s6sy761_spi_probe(struct spi_device *spi)
++ {
++-	pm_runtime_disable(&client->dev);
+++	struct device *dev = &spi->dev;
+++	struct s6sy761_data *sdata;
+++	int err;
+++
+++	sdata = devm_kzalloc(dev, sizeof(*sdata), GFP_KERNEL);
+++	if (!sdata)
+++		return -ENOMEM;
+++
+++	sdata->tx = devm_kzalloc(dev, S6SY761_SPI_BUF_SIZE, GFP_KERNEL);
+++	sdata->rx = devm_kzalloc(dev, S6SY761_SPI_BUF_SIZE, GFP_KERNEL);
+++	if (!sdata->tx || !sdata->rx)
+++		return -ENOMEM;
+++
+++	err = devm_mutex_init(dev, &sdata->io_lock);
+++	if (err)
+++		return err;
+++
+++	spi->bits_per_word = 8;
+++	err = spi_setup(spi);
+++	if (err)
+++		return err;
+++
+++	spi_set_drvdata(spi, sdata);
+++	sdata->dev = dev;
+++	sdata->irq = spi->irq;
+++	sdata->spi = spi;
+++	sdata->ops = &s6sy761_spi_ops;
+++
+++	return s6sy761_probe_common(sdata, BUS_SPI);
++ }
++ 
++ static int s6sy761_runtime_suspend(struct device *dev)
++ {
++ 	struct s6sy761_data *sdata = dev_get_drvdata(dev);
++ 
++-	return i2c_smbus_write_byte_data(sdata->client,
++-				S6SY761_APPLICATION_MODE, S6SY761_APP_SLEEP);
+++	return s6sy761_write_byte(sdata, S6SY761_APPLICATION_MODE,
+++				  S6SY761_APP_SLEEP);
++ }
++ 
++ static int s6sy761_runtime_resume(struct device *dev)
++ {
++ 	struct s6sy761_data *sdata = dev_get_drvdata(dev);
++ 
++-	return i2c_smbus_write_byte_data(sdata->client,
++-				S6SY761_APPLICATION_MODE, S6SY761_APP_NORMAL);
+++	return s6sy761_write_byte(sdata, S6SY761_APPLICATION_MODE,
+++				  S6SY761_APP_NORMAL);
++ }
++ 
++ static int s6sy761_suspend(struct device *dev)
++@@ -504,14 +764,14 @@ static int s6sy761_resume(struct device *dev)
++ 	if (err)
++ 		return err;
++ 
++-	enable_irq(sdata->client->irq);
+++	enable_irq(sdata->irq);
++ 
++ 	guard(mutex)(&sdata->input->mutex);
++ 
++ 	if (!input_device_enabled(sdata->input))
++ 		return 0;
++ 
++-	err = i2c_smbus_write_byte(sdata->client, S6SY761_SENSE_ON);
+++	err = s6sy761_command(sdata, S6SY761_SENSE_ON);
++ 
++ 	return err;
++ }
++@@ -542,12 +802,49 @@ static struct i2c_driver s6sy761_driver = {
++ 		.of_match_table = of_match_ptr(s6sy761_of_match),
++ 		.pm = pm_ptr(&s6sy761_pm_ops),
++ 	},
++-	.probe = s6sy761_probe,
++-	.remove = s6sy761_remove,
+++	.probe = s6sy761_i2c_probe,
++ 	.id_table = s6sy761_id,
++ };
++ 
++-module_i2c_driver(s6sy761_driver);
+++static const struct spi_device_id s6sy761_spi_id[] = {
+++	{ .name = "s6sy761" },
+++	{ }
+++};
+++MODULE_DEVICE_TABLE(spi, s6sy761_spi_id);
+++
+++static struct spi_driver s6sy761_spi_driver = {
+++	.driver = {
+++		.name = S6SY761_DEV_NAME,
+++		.dev_groups = s6sy761_sysfs_groups,
+++		.of_match_table = of_match_ptr(s6sy761_of_match),
+++		.pm = pm_ptr(&s6sy761_pm_ops),
+++	},
+++	.probe = s6sy761_spi_probe,
+++	.id_table = s6sy761_spi_id,
+++};
+++
+++static int __init s6sy761_init(void)
+++{
+++	int ret;
+++
+++	ret = i2c_add_driver(&s6sy761_driver);
+++	if (ret)
+++		return ret;
+++
+++	ret = spi_register_driver(&s6sy761_spi_driver);
+++	if (ret)
+++		i2c_del_driver(&s6sy761_driver);
+++
+++	return ret;
+++}
+++module_init(s6sy761_init);
+++
+++static void __exit s6sy761_exit(void)
+++{
+++	spi_unregister_driver(&s6sy761_spi_driver);
+++	i2c_del_driver(&s6sy761_driver);
+++}
+++module_exit(s6sy761_exit);
++ 
++ MODULE_AUTHOR("Andi Shyti <andi.shyti@samsung.com>");
++ MODULE_DESCRIPTION("Samsung S6SY761 Touch Screen");
++-- 
++2.50.1 (Apple Git-155)
++
+-- 
+2.50.1 (Apple Git-155)
+

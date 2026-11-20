@@ -9,9 +9,10 @@ The Pixel 5 (redfin) boots straight into plain, headless Ubuntu 24.04 arm64 on a
 - GPU (render only: Mesa freedreno GL 4.6 / Turnip Vulkan 1.3)
 - haptics (two buzzes when it is up)
 - display: a text console on the screen, switched off after 60 s idle (any key, e.g. Power, wakes it)
+- touchscreen (multitouch, `/dev/input/event*` "s6sy761")
 - sensors via the ADSP: accelerometer, gyroscope, magnetometer, barometer, light (`sudo pixel5-see read accel`)
 
-**Not yet:** touch, audio, cameras, deep sleep (suspend works but saves little). Details: [`PLAN.md`](PLAN.md).
+**Not yet:** audio, cameras, deep sleep (suspend works but saves little). Details: [`PLAN.md`](PLAN.md).
 
 ## Install
 

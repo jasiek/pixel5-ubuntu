@@ -76,3 +76,5 @@ local 0002-LOCAL-Input-add-a-minimal-TI-DRV2624-haptics-driver.patch
 # P6.4 display: Samsung S6E3HC2 DSC command-mode panel, generated from the
 # downstream panel DT (scripts/gen-panel-driver.sh)
 local 0004-LOCAL-drm-panel-add-the-Samsung-S6E3HC2-DSC-command-.patch
+# P6.4 touch: SPI transport for the S6SY761 driver (S6SY79x on QUP0 SE0)
+local 0005-LOCAL-Input-s6sy761-add-an-SPI-transport.patch

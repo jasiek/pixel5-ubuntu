@@ -810,8 +810,8 @@
 
 	/*
 	 * QUP wrapper 0 (live DT qcom,qupv3_0_geni_se@8c0000, SMMU stream
-	 * 0x4e3). Only SE5 is described: SE1 (0x884000, GPIOs 0-3) belongs
-	 * to TrustZone, see &tlmm.
+	 * 0x4e3). Only SE0 and SE5 are described: SE1 (0x884000, GPIOs 0-3)
+	 * belongs to TrustZone, see &tlmm.
 	 */
 	qupv3_id_0: geniqup@8c0000 {
 		compatible = "qcom,geni-se-qup";
@@ -823,6 +823,49 @@
 		#address-cells = <2>;
 		#size-cells = <2>;
 		ranges;
+
+		/*
+		 * Touch SPI (downstream lito-qupv3 qupv3_se0_spi + redfin-touch:
+		 * SPI 601, pins 42-45 function qup00, drive 6). No GPI DMA
+		 * described: spi-geni-qcom then uses FIFO/SE DMA.
+		 */
+		spi0: spi@880000 {
+			compatible = "qcom,geni-spi";
+			reg = <0x0 0x00880000 0x0 0x4000>;
+			clock-names = "se";
+			clocks = <&gcc GCC_QUPV3_WRAP0_S0_CLK>;
+			interrupts = <GIC_SPI 601 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&rpmhpd RPMHPD_CX>;
+			operating-points-v2 = <&qup_opp_table>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&qup_spi0_default>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/*
+			 * Samsung S6SY79x (downstream "sec,sec_ts", firmware
+			 * s6sy79x.bin in the IC's flash): the S6SY761 command
+			 * set over SPI (local patch 0005). Mode 3, 10 MHz,
+			 * IRQ GPIO 9 level low, reset GPIO 8 (pulsed low),
+			 * avdd L17A 3.304 V; no dvdd (commented out downstream).
+			 * GPIO 35 selects the bus master: low = AP (pinctrl).
+			 */
+			touchscreen@0 {
+				compatible = "samsung,s6sy761";
+				reg = <0>;
+				spi-max-frequency = <10000000>;
+				spi-cpol;
+				spi-cpha;
+				interrupts-extended = <&tlmm 9 IRQ_TYPE_LEVEL_LOW>;
+				reset-gpios = <&tlmm 8 GPIO_ACTIVE_LOW>;
+				avdd-supply = <&vreg_l17a_3p3>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&touch_irq_default>,
+					    <&touch_switch_default>;
+				touchscreen-size-x = <1080>;
+				touchscreen-size-y = <2340>;
+			};
+		};
 
 		/*
 		 * Bluetooth UART (live DT qcom,qup_uart@894000, SPI 606,
@@ -1412,6 +1455,17 @@
 			regulator-max-microvolt = <1800000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
+
+		/*
+		 * Touch avdd (lito-redfin-touch: pm8150_l17 at 3.304 V, HPM,
+		 * always-on downstream; its only user on redfin).
+		 */
+		vreg_l17a_3p3: ldo17 {
+			regulator-name = "vreg_l17a_3p3";
+			regulator-min-microvolt = <3304000>;
+			regulator-max-microvolt = <3304000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
 	};
 
 	regulators-1 {
@@ -1558,6 +1612,31 @@
 	 * the phone: each of the four alone does (Tests 66-81).
 	 */
 	gpio-reserved-ranges = <0 4>;
+
+	/* Downstream lito-pinctrl qupv3_se0_spi_active (touch) */
+	qup_spi0_default: qup-spi0-default-state {
+		pins = "gpio42", "gpio43", "gpio44", "gpio45";
+		function = "qup00";
+		drive-strength = <6>;
+		bias-disable;
+	};
+
+	/* Downstream lito-redfin-touch sec_ts_irq_default */
+	touch_irq_default: touch-irq-default-state {
+		pins = "gpio9";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	/* sec_ts_switch_default: touch SPI bus master = AP (low) */
+	touch_switch_default: touch-switch-default-state {
+		pins = "gpio35";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+		output-low;
+	};
 
 	/* Live DT qupv3_se9_i2c_active */
 	qup_i2c9_default: qup-i2c9-default-state {
