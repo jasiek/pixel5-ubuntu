@@ -14,7 +14,7 @@
 set -euo pipefail
 
 if [ ! -f /.dockerenv ]; then
-    DEV_CROSS=1 DEV_DOCKER_ARGS="-e MODULES" exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline.sh "$@"
+    DEV_CROSS=1 DEV_DOCKER_ARGS="-e MODULES -e BATTERY" exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline.sh "$@"
 fi
 
 BASE=/work/external/linux-next
@@ -75,10 +75,14 @@ done < "$FRAG"
 
 DTS=arch/arm64/boot/dts/qcom
 cp /work/kernel/mainline/dts/*.dts* "$SRC/$DTS/"
-# Battery OCV tables come from the phone's own DT (vendor data: generated
-# here, never committed). firmware/live.dts is made in P1 (see docs/log.md).
-[ -f /work/firmware/live.dts ] || { echo "firmware/live.dts missing (battery OCV tables)" >&2; exit 1; }
-python3 -I /work/scripts/gen-battery-ocv.py /work/firmware/live.dts > "$SRC/$DTS/sm7250-google-redfin-battery-ocv.dtsi"
+# Battery OCV tables from the downstream kernel's characterisation of the
+# redfin cell (external/kernel-redbull, GPL-2.0-only), generated into the
+# build tree. Same output as from this phone's live DT (P7.1), so a fresh
+# clone needs no phone dump. BATTERY=COS for phones with the other cell
+# (downstream picks by battery ID; this phone's is LSN).
+BATT=/work/external/kernel-redbull/arch/arm64/boot/dts/google/batterydata-qcom-r3-${BATTERY:-LSN}-4000.dtsi
+python3 -I /work/scripts/gen-battery-ocv.py "$BATT" "$(sed -n '1,5s/^\(qcom,[^ ]*\) {$/\1/p' "$BATT" | head -1)" \
+    > "$SRC/$DTS/sm7250-google-redfin-battery-ocv.dtsi"
 make "${ARGS[@]}" -j"$(nproc)" Image qcom/sm7250-google-redfin.dtb "$@"
 # MODULES=1: also build the modules and install them (stripped) to
 # build/mainline/out/modules-install/lib/modules/<release>.

@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Battery OCV tables for the mainline redfin DTB, from the phone's own DT.
+"""Battery OCV tables for the mainline redfin DTB, from downstream DT data.
 
-    scripts/gen-battery-ocv.py firmware/live.dts [PROFILE] > battery-ocv.dtsi
+    scripts/gen-battery-ocv.py <dts> [PROFILE] > battery-ocv.dtsi
+
+<dts> is either the kernel source's battery file (what build-mainline.sh
+uses: external/kernel-redbull/.../batterydata-qcom-r3-LSN-4000.dtsi) or a
+dtc dump of the phone's live DT (firmware/live.dts); both give the same
+output for this phone (P7.1).
 
 qcom_qg (the PM7250B fuel gauge) needs simple-battery ocv-capacity tables.
 The downstream DT carries the cell's characterisation as a QG battery profile
@@ -23,10 +28,13 @@ TABLE = "qcom,pc-temp-v2-lut"
 
 
 def u32_list(text, prop):
-    m = re.search(prop + r" = <([^>]*)>;", text)
+    # dtc output has one <...> group; the kernel source splits long arrays
+    # into "<...>,\n<...>" groups.
+    m = re.search(prop + r" = ((?:<[^>]*>\s*,?\s*)+);", text)
     if not m:
         raise SystemExit(f"{prop} not found")
-    vals = [int(v, 0) for v in m.group(1).split()]
+    # The kernel source writes negatives as "(-10)"; dtc's output as 0xfffffff6.
+    vals = [int(v.strip("()"), 0) for v in re.findall(r"\(\s*-?\w+\s*\)|[^\s<>,]+", m.group(1))]
     return [v - (1 << 32) if v >= 1 << 31 else v for v in vals]
 
 
