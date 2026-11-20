@@ -118,3 +118,24 @@ Subsystems (`/sys/bus/msm_subsys`, after loading all 218 first-stage modules, no
 `modem_b` (sda13, vfat, mounts read-only on the stock kernel): `image/` 146 MB, 40 files: `modem.mdt` + `modem.b00`–`b34`, `modem_pr/` (tqftpserv), `modemr.jsn` (pd-mapper), `saipan/`, `version.cfg`; plus `verinfo/`.
 
 Init facts (Tests 1–11, `docs/log.md`): our ramdisk must be **LZ4 legacy**; `watchdog_v2` must load within ~100 s; module loading must honour `modules.softdep` (`qmi_helpers pre: qrtr`); `reboot bootloader` only lands in fastboot once the full module set (restart reason via `msm-poweroff`) is up.
+
+## SoC info (downstream `/sys/devices/soc0`, 2026-11-20, serial omitted)
+
+The ADSP sensor PD reads these through FastRPC (Test 119); mainline has
+only `soc_id`, `revision`, `family`, `machine`, so pixel5 serves them as
+static files.
+
+| attribute | value |
+|---|---|
+| soc_id / machine / revision | 400 / LITO / 2.0 |
+| hw_platform | MTP (8) |
+| platform_subtype / platform_subtype_id | Unknown / 0 |
+| platform_version | 65536 |
+| g_hw_platform | OEM |
+| g_platform_subtype_id | 2 |
+| g_platform_version | 720936 |
+| raw_id / raw_version | 286 / 1 |
+| chip_family / raw_device_family / raw_device_number | 0x65 / 0x6 / 0xd |
+| pmic_model / pmic_die_revision | 65566 / 196608 |
+| foundry_id | 3 |
+| nproduct_id | 0x413 |
