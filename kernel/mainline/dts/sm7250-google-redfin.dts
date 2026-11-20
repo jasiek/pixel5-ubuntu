@@ -699,6 +699,40 @@
 			mboxes = <&ipcc IPCC_CLIENT_LPASS IPCC_MPROC_SIGNAL_GLINK_QMP>;
 			label = "lpass";
 			qcom,remote-pid = <2>;
+
+			/*
+			 * FastRPC: the sensor PD reads its registry and config
+			 * through it (served by a userspace daemon). Context
+			 * banks from the live DT adsprpc-smd: SIDs 0x1403-0x1405,
+			 * the last one shared (5 sessions); shape as sm6350.
+			 */
+			fastrpc {
+				compatible = "qcom,fastrpc";
+				qcom,glink-channels = "fastrpcglink-apps-dsp";
+				label = "adsp";
+				qcom,non-secure-domain;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				compute-cb@3 {
+					compatible = "qcom,fastrpc-compute-cb";
+					reg = <3>;
+					iommus = <&apps_smmu 0x1403 0x0>;
+				};
+
+				compute-cb@4 {
+					compatible = "qcom,fastrpc-compute-cb";
+					reg = <4>;
+					iommus = <&apps_smmu 0x1404 0x0>;
+				};
+
+				compute-cb@5 {
+					compatible = "qcom,fastrpc-compute-cb";
+					reg = <5>;
+					iommus = <&apps_smmu 0x1405 0x0>;
+					qcom,nsessions = <5>;
+				};
+			};
 		};
 	};
 

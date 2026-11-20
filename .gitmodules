@@ -40,3 +40,6 @@
 	path = external/linux-next
 	url = https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git
 	shallow = true
+[submodule "external/hexagonrpc"]
+	path = external/hexagonrpc
+	url = https://github.com/linux-msm/hexagonrpc
