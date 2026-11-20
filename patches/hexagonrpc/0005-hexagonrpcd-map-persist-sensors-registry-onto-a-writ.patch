@@ -1,0 +1,166 @@
+From d94c08f687300af37b898a7f871efa4c8cb51a65 Mon Sep 17 00:00:00 2001
+From: Jan Szumiec <noreply@localhost>
+Date: Fri, 20 Nov 2026 15:43:44 +0100
+Subject: [PATCH 5/6] hexagonrpcd: map persist/sensors/registry onto a writable
+ directory
+
+SPDX-License-Identifier: GPL-3.0-or-later
+The redfin ADSP sensor PD rebuilds its registry at boot: it writes
+registry/../temp.json and registry/../sns_reg_version, rewrites files
+in registry/ and stores calibration in factory_data/. None of these
+resolve in the virtual tree, where persist/sensors/registry only holds
+the two mapped subdirectories.
+
+If <prefix>/sensors/persist-registry/ exists, map the whole of
+persist/sensors/registry onto it with the writable backend. It is the
+only writable directory. Without it, nothing changes: sensors/registry
+and sensors/factory_data are served read-only as before.
+---
+ hexagonrpcd/hexagonrpcd.1  |  9 +++++++
+ hexagonrpcd/rpcd_builder.c | 52 +++++++++++++++++++++++++++++++++-----
+ 2 files changed, 55 insertions(+), 6 deletions(-)
+
+diff --git a/hexagonrpcd/hexagonrpcd.1 b/hexagonrpcd/hexagonrpcd.1
+index 54c77bb..c15ee7f 100644
+--- a/hexagonrpcd/hexagonrpcd.1
++++ b/hexagonrpcd/hexagonrpcd.1
+@@ -43,6 +43,8 @@ acdb                    /vendor/etc/acdbdata
+ dsp                     /vendor/dsp
+ sensors/config          /vendor/etc/sensors/config
+ sensors/registry        /mnt/vendor/persist/sensors/registry/registry
++sensors/factory_data    /mnt/vendor/persist/sensors/registry/factory_data
++sensors/persist-registry /mnt/vendor/persist/sensors/registry (writable)
+ sensors/sns_reg.conf    /vendor/etc/sensors/sns_reg_config
+ socinfo                 /sys/devices/soc0
+ .TE
+@@ -50,6 +52,13 @@ socinfo                 /sys/devices/soc0
+ These files and directories should be populated with files from your device's
+ Android firmware.
+ 
++Everything is served read-only, except for sensors/persist-registry. If that
++directory exists, it replaces sensors/registry and sensors/factory_data: it is
++served as all of /mnt/vendor/persist/sensors/registry (with registry and
++factory_data as real subdirectories, not symbolic links), and the remote
++processor may create, write, rename and remove files in it. Each of these
++operations is logged.
++
+ If you can pass the -R option, the convention is to pass -R
+ /usr/share/qcom/SOC/VENDOR/DEVICE, where SOC is the SoC name in lowercase,
+ VENDOR is the capitalized name of the device vendor, and DEVICE is the device
+diff --git a/hexagonrpcd/rpcd_builder.c b/hexagonrpcd/rpcd_builder.c
+index dc0f409..9e9e51f 100644
+--- a/hexagonrpcd/rpcd_builder.c
++++ b/hexagonrpcd/rpcd_builder.c
+@@ -20,8 +20,10 @@
+  */
+ 
+ #include <stdarg.h>
++#include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <sys/stat.h>
+ 
+ #include "hexagonfs.h"
+ 
+@@ -31,6 +33,7 @@
+ #define SENSORS_CONFIG		"/sensors/config/"
+ #define SENSORS_REGISTRY	"/sensors/registry/"
+ #define SENSORS_FACTORY		"/sensors/factory_data/"
++#define SENSORS_PERSIST		"/sensors/persist-registry/"
+ #define SNS_REG_CONFIG		"/sensors/sns_reg.conf"
+ #define SYSFS_SOCINFO		"/socinfo/"
+ 
+@@ -105,6 +108,21 @@ static struct hexagonfs_dirent *hfs_map_or_empty(const char *name, const char *p
+ 	return file;
+ }
+ 
++static struct hexagonfs_dirent *hfs_map_rw(const char *name, const char *path)
++{
++	struct hexagonfs_dirent *file;
++
++	file = malloc(sizeof(struct hexagonfs_dirent));
++	if (file == NULL)
++		return NULL;
++
++	file->name = name;
++	file->ops = &hexagonfs_mapped_rw_ops;
++	file->u.phys = path;
++
++	return file;
++}
++
+ /*
+  * Construct the root directory
+  *
+@@ -112,9 +130,10 @@ static struct hexagonfs_dirent *hfs_map_or_empty(const char *name, const char *p
+  */
+ struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
+ {
+-	char *acdbdata, *dsp_libs, *sns_cfg, *sns_fac, *sns_reg, *sns_reg_config, *socinfo;
++	char *acdbdata, *dsp_libs, *sns_cfg, *sns_fac, *sns_persist, *sns_reg, *sns_reg_config, *socinfo;
+ 	size_t n_prefix;
+-	struct hexagonfs_dirent *persist_dir, *vendor_dir;
++	struct hexagonfs_dirent *persist_dir, *registry_dir, *vendor_dir;
++	struct stat stats;
+ 
+ 	n_prefix = strlen(prefix);
+ 
+@@ -122,6 +141,7 @@ struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
+ 	sns_cfg = malloc(n_prefix + strlen(SENSORS_CONFIG) + 1);
+ 	sns_reg = malloc(n_prefix + strlen(SENSORS_REGISTRY) + 1);
+ 	sns_fac = malloc(n_prefix + strlen(SENSORS_FACTORY) + 1);
++	sns_persist = malloc(n_prefix + strlen(SENSORS_PERSIST) + 1);
+ 	sns_reg_config = malloc(n_prefix + strlen(SNS_REG_CONFIG) + 1);
+ 	socinfo = malloc(n_prefix + strlen(SYSFS_SOCINFO) + 1);
+ 
+@@ -147,6 +167,11 @@ struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
+ 		strcat(sns_fac, SENSORS_FACTORY);
+ 	}
+ 
++	if (sns_persist != NULL) {
++		strcpy(sns_persist, prefix);
++		strcat(sns_persist, SENSORS_PERSIST);
++	}
++
+ 	if (sns_reg_config != NULL) {
+ 		strcpy(sns_reg_config, prefix);
+ 		strcat(sns_reg_config, SNS_REG_CONFIG);
+@@ -163,16 +188,31 @@ struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
+ 		strcat(dsp_libs, dsp);
+ 	}
+ 
++	/*
++	 * The sensor registry service rewrites its files in
++	 * persist/sensors/registry (registry/, factory_data/, temp.json and
++	 * sns_reg_version). If the directory for that exists, map all of
++	 * persist/sensors/registry onto it, writable. This is the only
++	 * writable directory. Otherwise, serve the registry read-only.
++	 */
++	if (sns_persist != NULL && !stat(sns_persist, &stats)
++	 && S_ISDIR(stats.st_mode)) {
++		fprintf(stderr, "Writable sensor registry: %s\n", sns_persist);
++		registry_dir = hfs_map_rw("registry", sns_persist);
++	} else {
++		registry_dir = hfs_mkdir("registry", 2,
++					hfs_map("registry", sns_reg),
++					hfs_map_or_empty("factory_data", sns_fac)
++			       );
++	}
++
+ 	/*
+ 	 * Some platforms need this in / and some need it in /mnt/vendor. Form
+ 	 * a hard link between both locations.
+ 	 */
+ 	persist_dir = hfs_mkdir("persist", 1,
+ 				hfs_mkdir("sensors", 1,
+-					hfs_mkdir("registry", 2,
+-						hfs_map("registry", sns_reg),
+-						hfs_map_or_empty("factory_data", sns_fac)
+-					)
++					registry_dir
+ 				)
+ 		      );
+ 
+-- 
+2.50.1 (Apple Git-155)
+

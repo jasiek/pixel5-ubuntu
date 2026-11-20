@@ -1,0 +1,38 @@
+From 98253494efb73c502af93e876d5d37019065ec43 Mon Sep 17 00:00:00 2001
+From: Jan Szumiec <noreply@localhost>
+Date: Fri, 20 Nov 2026 15:42:25 +0100
+Subject: [PATCH 2/6] hexagonrpcd: dispatch extended method numbers
+
+SPDX-License-Identifier: GPL-3.0-or-later
+The scalars word only has 5 bits for the method. QAIC interfaces with
+more than 31 methods send method 31 and put the real method number in
+the first word of the primary input buffer (see _skel_invoke() in
+qualcomm/fastrpc src/apps_std_skel.c). apps_std_stat (31) already
+counts that word as an input number; look it up so that methods 32 and
+above can be added to the table.
+---
+ hexagonrpcd/listener.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/hexagonrpcd/listener.c b/hexagonrpcd/listener.c
+index e298688..e1994c2 100644
+--- a/hexagonrpcd/listener.c
++++ b/hexagonrpcd/listener.c
+@@ -233,6 +233,14 @@ static int invoke_requested_procedure(size_t n_ifaces,
+ 		return 1;
+ 	}
+ 
++	/*
++	 * The method field is 5 bits wide. Method 31 is an escape: the real
++	 * method number (31 or above) leads the primary input buffer.
++	 */
++	if (method == 31 && REMOTE_SCALARS_INBUFS(sc) > 0
++	 && decoded[0].s >= 4)
++		method = *(const uint32_t *) decoded[0].p;
++
+ 	if (method >= ifaces[handle]->n_procs) {
+ 		fprintf(stderr, "Unsupported method: %u (%08x)\n", method, sc);
+ 		*result = AEE_EUNSUPPORTED;
+-- 
+2.50.1 (Apple Git-155)
+

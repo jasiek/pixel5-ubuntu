@@ -1,0 +1,45 @@
+From 88b8479cc713f9992a366a3cb1694d316af35d9e Mon Sep 17 00:00:00 2001
+From: Jan Szumiec <noreply@localhost>
+Date: Fri, 20 Nov 2026 15:42:25 +0100
+Subject: [PATCH 3/6] hexagonrpcd: apps_std: fix the fflush definition
+
+SPDX-License-Identifier: GPL-3.0-or-later
+fflush takes one input number (the file) and returns nothing: the IDL
+is 'long fflush(in FILE sin)', and the QAIC skeleton wants one input
+buffer of 4 bytes and no output buffer. With 8 input numbers every
+call was rejected with AEE_EBADPARM, and had it passed, the memset
+would have written through a NULL output buffer list.
+---
+ hexagonrpcd/apps_std.c              | 2 --
+ hexagonrpcd/interfaces/apps_std.def | 2 +-
+ 2 files changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/hexagonrpcd/apps_std.c b/hexagonrpcd/apps_std.c
+index ff4d5a7..640b20a 100644
+--- a/hexagonrpcd/apps_std.c
++++ b/hexagonrpcd/apps_std.c
+@@ -60,8 +60,6 @@ static uint32_t apps_std_fflush(void *data,
+ 	printf("ignore fflush(%u)\n", *fd);
+ #endif
+ 
+-	memset(outbufs[0].p, 0, outbufs[0].s);
+-
+ 	return 0;
+ }
+ 
+diff --git a/hexagonrpcd/interfaces/apps_std.def b/hexagonrpcd/interfaces/apps_std.def
+index 2fbbdb1..8f2a9cb 100644
+--- a/hexagonrpcd/interfaces/apps_std.def
++++ b/hexagonrpcd/interfaces/apps_std.def
+@@ -25,7 +25,7 @@
+ #include <libhexagonrpc/interface.h>
+ 
+ HEXAGONRPC_DEFINE_REMOTE_METHOD(1, apps_std_freopen, 1, 0, 1, 1)
+-HEXAGONRPC_DEFINE_REMOTE_METHOD(2, apps_std_fflush, 8, 0, 0, 0)
++HEXAGONRPC_DEFINE_REMOTE_METHOD(2, apps_std_fflush, 1, 0, 0, 0)
+ HEXAGONRPC_DEFINE_REMOTE_METHOD(3, apps_std_fclose, 1, 0, 0, 0)
+ HEXAGONRPC_DEFINE_REMOTE_METHOD(4, apps_std_fread, 1, 0, 2, 1)
+ HEXAGONRPC_DEFINE_REMOTE_METHOD(9, apps_std_fseek, 3, 0, 0, 0)
+-- 
+2.50.1 (Apple Git-155)
+
