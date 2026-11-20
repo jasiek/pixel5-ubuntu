@@ -677,15 +677,14 @@
 	 * ADSP and CDSP (live DT qcom,lpass@3000000 PAS ID 1, qcom,turing@8300000
 	 * PAS ID 18; nodes as nairo 0149). The SM8250 compatible matches the
 	 * same PAS data until nairo 0121 (the SM7250 one) is in the series.
-	 * Disabled: tried for the s2idle work (Tests 114-116). The ADSP boots
-	 * but its sensor process crashes every ~10 s (sar.cc chre_utils fatal,
-	 * missing sensor config); the CDSP fails PAS authentication (-22).
-	 * Neither got the SoC into AOSS sleep. To retry, set status "okay"
-	 * and start one with `pixel5-rproc adsp start`.
+	 * The ADSP runs (Tests 119-131): pixel5-adsp.service starts it once its
+	 * firmware is reachable (the probe-time auto boot fails), hexagonrpcd
+	 * serves its sensor process, and the smp2p sleepstate entries keep
+	 * Google's CHRE from crashing it. The CDSP stays disabled: TZ refuses
+	 * its image (-22, Tests 115-118).
 	 */
 	remoteproc_adsp: remoteproc@3000000 {
 		compatible = "qcom,sm8250-adsp-pas";
-		status = "disabled";
 		reg = <0x0 0x03000000 0x0 0x100>;
 
 		interrupts-extended = <&pdc 16 IRQ_TYPE_EDGE_RISING>,

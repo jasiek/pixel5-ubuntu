@@ -12,6 +12,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
 COPY tools/ /src/
 RUN gcc -O2 -Wall -Werror -o /pixel5-rumble /src/pixel5-rumble.c
 
+# hexagonrpcd (linux-msm/hexagonrpc, GPL-3.0-or-later, external/hexagonrpc)
+# with our patches (patches/hexagonrpc): the FastRPC file server the ADSP
+# sensor process needs (docs/log.md Tests 119-131).
+FROM ubuntu:24.04 AS hexagonrpc-build
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+        meson ninja-build pkg-config patch \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=hexagonrpc . /src/
+COPY --from=hexagonrpc-patches *.patch /patches/
+RUN cd /src && for p in /patches/*.patch; do patch -p1 --quiet < "$p"; done \
+    && meson setup /build --prefix=/usr --buildtype=release \
+    && ninja -C /build \
+    && DESTDIR=/inst meson install -C /build
+
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -30,6 +44,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY overlay/ /
 COPY --from=tools /pixel5-rumble /usr/local/bin/pixel5-rumble
+COPY --from=hexagonrpc-build /inst/usr/bin/hexagonrpcd /usr/bin/
+COPY --from=hexagonrpc-build /inst/usr/lib/libhexagonrpc.so.0.5 /usr/lib/
 
 RUN chmod 600 /etc/NetworkManager/system-connections/*.nmconnection \
     && chmod 440 /etc/sudoers.d/ubuntu \
@@ -41,7 +57,7 @@ RUN chmod 600 /etc/NetworkManager/system-connections/*.nmconnection \
         pixel5-firmware.service pd-mapper.service \
         rmtfs.service tqftpserv.service pixel5-wifi.service pixel5-wifi-ok.timer \
         pixel5-qgauge.service pixel5-charge-hold.service pixel5-alive.service \
-        pixel5-modem-rproc.service pixel5-bt.service \
+        pixel5-modem-rproc.service pixel5-bt.service pixel5-adsp.service \
     # Host keys are generated on first boot (ssh.service drop-in).
     && rm -f /etc/ssh/ssh_host_* \
     # Fresh machine-id on first boot.
@@ -49,4 +65,7 @@ RUN chmod 600 /etc/NetworkManager/system-connections/*.nmconnection \
     && passwd -l ubuntu \
     # /dev/dri/renderD128 (Adreno, mainline) is group render.
     && (getent group render >/dev/null || groupadd -r render) \
-    && usermod -aG render ubuntu
+    && usermod -aG render ubuntu \
+    # hexagonrpcd (ADSP FastRPC server) runs as its own user.
+    && useradd -r -U -d /nonexistent -s /usr/sbin/nologin fastrpc \
+    && ldconfig

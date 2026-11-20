@@ -1,0 +1,58 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Mainline: start or stop the ADSP (audio + sensors DSP) and prepare what
+# its sensor process reads through FastRPC (served by hexagonrpcd, see
+# pixel5-sensorspd.service). docs/log.md Tests 119-131.
+#   pixel5-adsp start | stop
+# Served root, /var/lib/pixel5/hexagonrpc:
+#   sensors/config, sensors/sns_reg.conf  -> /vendor/etc/sensors (read-only)
+#   sensors/persist-registry/             the sensor registry, writable:
+#       a copy of persist's sensors/registry/{registry,factory_data}, made
+#       once. The persist partition itself is only ever mounted read-only,
+#       and the copy never leaves the phone (it holds calibration data).
+#   socinfo/                              the downstream soc0 attributes the
+#       registry setup reads (docs/device-info.md); mainline lacks them
+#   dsp/adsp, acdb                        -> /vendor (read-only)
+set -eu
+R=/var/lib/pixel5/hexagonrpc
+P=$R/sensors/persist-registry
+
+prepare() {
+    mkdir -p $R/sensors $R/dsp $R/socinfo
+    ln -sfn /vendor/etc/sensors/config $R/sensors/config
+    ln -sfn /vendor/etc/sensors/sns_reg_config $R/sensors/sns_reg.conf
+    ln -sfn /vendor/dsp/adsp $R/dsp/adsp
+    ln -sfn /vendor/etc/acdbdata $R/acdb
+
+    w() { printf '%s\n' "$2" > $R/socinfo/$1; }
+    w soc_id 400; w revision 2.0; w machine LITO; w family Snapdragon
+    w hw_platform MTP; w platform_subtype Unknown; w platform_subtype_id 0
+    w platform_version 65536
+    w g_hw_platform OEM; w g_platform_subtype_id 2; w g_platform_version 720936
+
+    if [ ! -e $P/.from-persist ]; then
+        m=/run/pixel5-persist-ro
+        mkdir -p $m
+        mount -o ro,noload /dev/disk/by-partlabel/persist $m
+        rm -rf $P.new && mkdir -p $P.new
+        cp -a $m/sensors/registry/registry $m/sensors/registry/factory_data $P.new/ || {
+            umount $m; exit 1; }
+        umount $m
+        touch $P.new/.from-persist
+        rm -rf $P && mv $P.new $P
+        echo "adsp: sensor registry copied from persist"
+    fi
+    # hexagonrpcd runs as fastrpc; it opens the writable tree with
+    # O_NOFOLLOW, so these must be real directories.
+    chown -R fastrpc:fastrpc $P
+}
+
+case "${1:-}" in
+start)
+    prepare
+    /usr/local/sbin/pixel5-rproc adsp start ;;
+stop)
+    /usr/local/sbin/pixel5-rproc adsp stop ;;
+*)
+    echo "usage: $0 start|stop" >&2; exit 2 ;;
+esac

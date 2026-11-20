@@ -33,7 +33,12 @@ if [ ! -f /.dockerenv ]; then
     # build silently under pipefail (Pixel 2 lesson).
     { cat ~/.ssh/*.pub 2>/dev/null || true; cat build/ssh/pixel5_ed25519.pub; } | sort -u > build/ssh/authorized_keys
 
-    docker build --platform linux/arm64 -t pixel5-rootfs rootfs/
+    # hexagonrpc (pinned submodule) and our patches for it come in as
+    # named build contexts; the build context itself stays rootfs/.
+    docker build --platform linux/arm64 \
+        --build-context hexagonrpc=external/hexagonrpc \
+        --build-context hexagonrpc-patches=patches/hexagonrpc \
+        -t pixel5-rootfs rootfs/
     cid=$(docker create --platform linux/arm64 pixel5-rootfs)
     trap 'docker rm -f "$cid" >/dev/null' EXIT
     docker export "$cid" -o build/rootfs.tar

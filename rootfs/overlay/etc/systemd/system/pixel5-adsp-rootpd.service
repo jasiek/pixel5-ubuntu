@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+# Mainline kernel: hexagonrpcd for the ADSP root PD: serves the files and
+# calls the DSP makes through FastRPC (/var/lib/pixel5/hexagonrpc, made by
+# pixel5-adsp). After an ADSP restart /dev/fastrpc-adsp comes back and the
+# daemon reattaches (Restart=always).
+[Unit]
+Description=FastRPC server for the ADSP root PD (hexagonrpcd)
+ConditionKernelVersion=>=6
+After=pixel5-adsp.service
+PartOf=pixel5-adsp.service
+StartLimitIntervalSec=0
+
+[Service]
+User=fastrpc
+Group=fastrpc
+ExecStartPre=/bin/sh -c 'for i in $$(seq 100); do [ -e /dev/fastrpc-adsp ] && exit 0; sleep 0.1; done; exit 1'
+ExecStart=/usr/bin/hexagonrpcd -f /dev/fastrpc-adsp -d adsp -R /var/lib/pixel5/hexagonrpc
+Restart=always
+RestartSec=2

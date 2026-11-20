@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+# Mainline kernel: start the ADSP (audio + sensors DSP). Its sensor
+# process needs hexagonrpcd (pixel5-sensorspd.service) within ~10 s and
+# the smp2p "sleepstate" entry (board DTS) to run without crashing.
+[Unit]
+Description=Start the ADSP (mainline remoteproc)
+ConditionKernelVersion=>=6
+# Kernels whose DT has no ADSP node (before Test 132) skip this.
+ConditionPathExists=/sys/firmware/devicetree/base/soc@0/remoteproc@3000000
+Wants=pd-mapper.service pixel5-firmware.service pixel5-sensorspd.service pixel5-adsp-rootpd.service
+After=pd-mapper.service pixel5-firmware.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/pixel5-adsp start
+ExecStop=/usr/local/sbin/pixel5-adsp stop
+
+[Install]
+WantedBy=multi-user.target
