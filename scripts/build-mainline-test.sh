@@ -9,12 +9,15 @@
 #     works. Back in Ubuntu instead = panic (panic=10) or no reboot-mode:
 #     androidboot.bootreason tells which. No earlycon (no UART).
 # EXTRA="..." appends to the cmdline (e.g. EXTRA=pixel5.reset_at=3).
+# UNUSED="..." replaces the default "clk_ignore_unused pd_ignore_unused"
+# (t3/t4/default; UNUSED=clk_ignore_unused lets genpd switch off unused
+# power domains).
 # DTB=build/... uses another DTB (e.g. one with nodes disabled by fdtput).
 # Needs scripts/build-mainline.sh first.
 set -euo pipefail
 
 if [ ! -f /.dockerenv ]; then
-    DEV_DOCKER_ARGS="-e EXTRA -e PANIC -e DTB -e TIMEOUT -e FALLBACK" exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline-test.sh "$@"
+    DEV_DOCKER_ARGS="-e EXTRA -e PANIC -e DTB -e TIMEOUT -e FALLBACK -e UNUSED" exec "$(dirname "$0")/dev.sh" /work/scripts/build-mainline-test.sh "$@"
 fi
 TEST=${1:?usage: build-mainline-test.sh t1}
 OUT=/work/build/mainline/out
@@ -52,7 +55,7 @@ t3)
     # (scripts/serial-sh.py). Back to fastboot after TIMEOUT s (default 300).
     KMODS=0 /work/scripts/build-initramfs.sh initramfs/init "${T#/work/}/initramfs.cpio.lz4" >/dev/null
     RD=$T/initramfs.cpio.lz4
-    CMD="initdebug initdebug_timeout=${TIMEOUT:-300} panic=${PANIC:--1} clk_ignore_unused pd_ignore_unused${EXTRA:+ $EXTRA}"
+    CMD="initdebug initdebug_timeout=${TIMEOUT:-300} panic=${PANIC:--1} ${UNUSED-clk_ignore_unused pd_ignore_unused}${EXTRA:+ $EXTRA}"
     ;;
 t4|default)
     # Full boot: our normal init mounts userdata and switch_roots into
@@ -60,7 +63,7 @@ t4|default)
     # 600) unless cancelled with `sudo pkill reboot-bootloader`.
     KMODS=0 /work/scripts/build-initramfs.sh initramfs/init "${T#/work/}/initramfs.cpio.lz4" >/dev/null
     RD=$T/initramfs.cpio.lz4
-    CMD="pixel5.fallback=${FALLBACK:-600} panic=${PANIC:--1} clk_ignore_unused pd_ignore_unused${EXTRA:+ $EXTRA}"
+    CMD="pixel5.fallback=${FALLBACK:-600} panic=${PANIC:--1} ${UNUSED-clk_ignore_unused pd_ignore_unused}${EXTRA:+ $EXTRA}"
     [ "$TEST" = default ] && CMD=${CMD#pixel5.fallback=* }
     ;;
 *) echo "unknown test $TEST" >&2; exit 2 ;;

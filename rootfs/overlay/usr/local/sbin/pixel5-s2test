@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# s2idle test: SoC sleep counters, rtcwake freeze <s>, counters again.
+S=${1:-60}; L=/var/lib/pixel5/s2idle.log
+st() { modprobe qcom_stats 2>/dev/null; for f in aosd cxsd ddr modem; do printf "%s=%s/%s " $f "$(sed -n "s/^Count: //p" /sys/kernel/debug/qcom_stats/$f)" "$(sed -n "s/^Accumulated Duration: //p" /sys/kernel/debug/qcom_stats/$f)"; done; echo; }
+{ echo "== $(date -u +%T) s2idle ${S}s"; st; rtcwake -m freeze -s "$S" >/dev/null 2>&1; echo "rc=$? back $(date -u +%T)"; st
+  echo "suspend ok/fail: $(cat /sys/power/suspend_stats/success)/$(cat /sys/power/suspend_stats/fail)"; } >> $L 2>&1

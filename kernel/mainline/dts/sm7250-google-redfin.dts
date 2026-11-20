@@ -623,6 +623,16 @@
 	};
 
 	/*
+	 * AOP sleep statistics (AOSS sleep, CX collapse, DDR): the live DT
+	 * qcom,rpm-stats reads its offset word at 0xc3f0004, the layout
+	 * mainline's qcom,rpmh-stats reads on sm8250/sm6350/sc7180.
+	 */
+	sram@c3f0000 {
+		compatible = "qcom,rpmh-stats";
+		reg = <0x0 0x0c3f0000 0x0 0x400>;
+	};
+
+	/*
 	 * QUP wrapper 0 (live DT qcom,qupv3_0_geni_se@8c0000, SMMU stream
 	 * 0x4e3). Only SE5 is described: SE1 (0x884000, GPIOs 0-3) belongs
 	 * to TrustZone, see &tlmm.
