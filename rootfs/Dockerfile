@@ -3,7 +3,8 @@
 # Built with `docker build`, then exported and packed into an ext4 image by
 # scripts/build-rootfs.sh. The official ubuntu:24.04 image is ubuntu-base
 # plus a few Docker tweaks, and already has user `ubuntu` (uid 1000, sudo).
-# Headless first: no camera/GPU/audio userspace until those phases.
+# Headless first: no camera/GPU/audio userspace until those phases. The GPU
+# works on mainline (Test 98); Mesa is an `apt install` away, not in the image.
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -36,4 +37,7 @@ RUN chmod 600 /etc/NetworkManager/system-connections/*.nmconnection \
     && rm -f /etc/ssh/ssh_host_* \
     # Fresh machine-id on first boot.
     && : > /etc/machine-id \
-    && passwd -l ubuntu
+    && passwd -l ubuntu \
+    # /dev/dri/renderD128 (Adreno, mainline) is group render.
+    && (getent group render >/dev/null || groupadd -r render) \
+    && usermod -aG render ubuntu

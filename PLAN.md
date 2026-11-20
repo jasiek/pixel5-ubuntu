@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: **Owner:** (1) look at the screen during a mainline boot: splash gone after ~30 s? (Tests 96–97: rails off, 100 mA less); (2) P6.5 needs your OK to flash mainline as default. Meanwhile P6.4 GPU A620 (nairo 0033–0036 apply; GPU nodes in our board DTS), Bluetooth, haptics (DRV2624: the mainline alive signal).
+## ▶ RESUME HERE: **Owner:** (1) look at the screen during a mainline boot: splash gone after ~30 s? (Tests 96–97: rails off, 100 mA less); (2) P6.5 needs your OK to flash mainline as default. Meanwhile P6.4: Bluetooth (hci_qca on WCN3990), haptics (DRV2624: the mainline alive signal). GPU done (Test 98).
 
 ---
 
@@ -119,7 +119,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
   - [x] UFS + USB2 gadget + rootfs (nairo patches; 32-bit DMA mask) _Done 2026-11-19 (Tests 83–86): reads/writes verified, our Ubuntu boots on mainline, SSH over USB in 22 s. Mainline modules installed (Test 87): Ubuntu on mainline `running`, 0 failed units._
   - [x] Charger (SMB5) + fuel gauge (QGauge), cpufreq + thermal _Done 2026-11-19 (Tests 88–91): qcom_smbx + qcom_qg (OCV tables generated from the phone's DT at build time), 80/70 hold via USB input suspend (`pixel5-charge-hold`), one full cycle verified; cpufreq (schedutil, 3 policies); 27 TSENS zones with 110 °C shutdown._
   - [x] Modem (MPSS PAS + Pixel SMEM socinfo quirk, tqftpserv `modem_pr/`, pd-mapper table) → wifi (ath10k_snoc, `board-2.bin` from vendor `bdwlan*`) _Done 2026-11-19 (Tests 92–95): modem boots via qcom_q6v5_pas without the SMEM item; wifi at boot in 15–17 s with a stable MAC, SSH over wifi; board.bin = the phone's bdwlan-redfin.bin, firmware-5.bin pinned from linux-firmware. Not done: IPA/mobile data, calls._
-  - [ ] GPU A620 (simpledrm first, then msm + Mesa)
+  - [x] GPU A620 (simpledrm first, then msm + Mesa) _Done 2026-11-20 (Test 98): msm render-only (no display yet), freedreno FD620 GL 4.6 / Turnip Vulkan 1.3, 275/400 MHz. Needs linux-firmware a650_sqe.fw (vendor v93 too old). simpledrm skipped: it would keep the panel lit._
   - [ ] Panel S6E3HC2 DSC command mode: **new driver** from downstream DCS sequences
   - [ ] Touch S6SY79x: **SPI transport** for `s6sy761`; GPIO 35 to the AP
   - [ ] Audio: 2x CS35L41 (TDM) + RT5514 mics; watch for ADSP restarts every ~40 s
