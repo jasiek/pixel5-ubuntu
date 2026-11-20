@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: mainline is the default kernel (P6.5, boot_b). Next: P6.4 suspend (s2idle; a failed resume needs a hand on the power button, so test with the owner nearby), then Phase 7 (one-command build).
+## ▶ RESUME HERE: mainline with ADSP sensors is the default (boot_b, `gdadf8b4adcdb`). s2idle works but never reaches AOSS sleep (parked, see Tests 101–131). Next: Phase 7 (one-command build).
 
 ---
 
@@ -125,7 +125,8 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
   - [ ] Audio: 2x CS35L41 (TDM) + RT5514 mics; watch for ADSP restarts every ~40 s
   - [x] Bluetooth (hci_qca) _Done 2026-11-20 (Test 99): WCN3991 on QUP0 SE5, vendor firmware, NVM deep-sleep byte patched at boot (else wedges after idle and crashes WLAN), machine-id BD address._
   - [x] Haptics (DRV2624: new driver) _Done 2026-11-20 (Test 100): local patch 0002 (FF_RUMBLE, RTP), pixel5-alive buzzes on mainline. Owner confirmed (2 buzzes)._
-  - [ ] Suspend (s2idle)
+  - [x] Sensors (ADSP SEE) _Done 2026-11-20 (Tests 114–134): ADSP via PAS + FastRPC node + smp2p `sleepstate` entries (without them Google's CHRE fatals every 10 s); hexagonrpcd + our write/large-buffer patches serves a writable copy of persist's registry; `pixel5-see` reads accel, gyro, mag, pressure, light from Linux. CDSP: TZ refuses it (-22), parked._
+  - [ ] Suspend (s2idle) _Partly 2026-11-20 (Tests 101–131): suspends and resumes cleanly (wifi, BT, modem survive), but the SoC never reaches AOSS sleep (`aosd` 0) even with no Linux votes and a running ADSP; downstream gives no reference under Ubuntu. Parked._
 - [x] **P6.5** (owner OK) Flash mainline as default on the active slot; downstream stays on the other. _Done 2026-11-20: mainline on boot_b (slot a is factory-unbootable, so downstream is a backup image instead: build/backup/boot_b-downstream-2026-11-20.img). SSH 28 s after power-on._
 
 ## Phase 7: One-command build + guided flashing (half a day; copy Pixel 2 P9)
@@ -136,7 +137,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
 - [ ] **P7.3** README: install flow.
 
 ## Parked (research problems; pick up only on request)
-Cameras (no SM7250 CAMSS, no IMX363/IMX481 drivers), rear fingerprint (TrustZone), CDSP + Venus video (TZ refuses on other SM7250 phones), wireless charging (P9382), 5G NR and VoLTE (unproven anywhere), NFC (ST21NFC fit unverified), SSC sensors (needs hexagonrpcd + libssc), modem data/SMS on downstream (needs a SIM).
+Cameras (no SM7250 CAMSS, no IMX363/IMX481 drivers), rear fingerprint (TrustZone), CDSP + Venus video (TZ refuses on other SM7250 phones), wireless charging (P9382), 5G NR and VoLTE (unproven anywhere), NFC (ST21NFC fit unverified), modem data/SMS on downstream (needs a SIM).
 
 ## Open questions (verify on the phone, cheapest first)
 1. Firmware file names in `/vendor/firmware` and `modem_a:image/` (P1.6).
