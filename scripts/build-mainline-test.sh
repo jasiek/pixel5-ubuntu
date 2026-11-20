@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 # Pack a mainline test boot image (P6.2 T1): header v2 with our DTB, for
 # `fastboot boot` only (writes nothing on the phone).
-#   scripts/build-mainline-test.sh t1|t3|t4   -> build/boot-mainline-<test>.img
+#   scripts/build-mainline-test.sh t1|t3|t4|default -> build/boot-mainline-<test>.img
+# default: t4 without the fallback timer, the image flashed to boot_b (P6.5).
 # t1: the initramfs is one static program that reboots into the bootloader.
 #     Back in fastboot = the kernel reached userspace and PON reboot-mode
 #     works. Back in Ubuntu instead = panic (panic=10) or no reboot-mode:
@@ -53,13 +54,14 @@ t3)
     RD=$T/initramfs.cpio.lz4
     CMD="initdebug initdebug_timeout=${TIMEOUT:-300} panic=${PANIC:--1} clk_ignore_unused pd_ignore_unused${EXTRA:+ $EXTRA}"
     ;;
-t4)
+t4|default)
     # Full boot: our normal init mounts userdata and switch_roots into
     # Ubuntu. pixel5.fallback: back to fastboot after FALLBACK s (default
     # 600) unless cancelled with `sudo pkill reboot-bootloader`.
     KMODS=0 /work/scripts/build-initramfs.sh initramfs/init "${T#/work/}/initramfs.cpio.lz4" >/dev/null
     RD=$T/initramfs.cpio.lz4
     CMD="pixel5.fallback=${FALLBACK:-600} panic=${PANIC:--1} clk_ignore_unused pd_ignore_unused${EXTRA:+ $EXTRA}"
+    [ "$TEST" = default ] && CMD=${CMD#pixel5.fallback=* }
     ;;
 *) echo "unknown test $TEST" >&2; exit 2 ;;
 esac

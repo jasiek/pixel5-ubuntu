@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: **Owner:** P6.5 needs your explicit OK to flash mainline as default. Meanwhile P6.4: suspend (s2idle; a failed resume needs a hand on the power button). GPU (98), Bluetooth (99), haptics (100) done; screen dark + buzzes confirmed by the owner.
+## ▶ RESUME HERE: mainline is the default kernel (P6.5, boot_b). Next: P6.4 suspend (s2idle; a failed resume needs a hand on the power button, so test with the owner nearby), then Phase 7 (one-command build).
 
 ---
 
@@ -126,7 +126,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
   - [x] Bluetooth (hci_qca) _Done 2026-11-20 (Test 99): WCN3991 on QUP0 SE5, vendor firmware, NVM deep-sleep byte patched at boot (else wedges after idle and crashes WLAN), machine-id BD address._
   - [x] Haptics (DRV2624: new driver) _Done 2026-11-20 (Test 100): local patch 0002 (FF_RUMBLE, RTP), pixel5-alive buzzes on mainline. Owner confirmed (2 buzzes)._
   - [ ] Suspend (s2idle)
-- [ ] **P6.5** (owner OK) Flash mainline as default on the active slot; downstream stays on the other.
+- [x] **P6.5** (owner OK) Flash mainline as default on the active slot; downstream stays on the other. _Done 2026-11-20: mainline on boot_b (slot a is factory-unbootable, so downstream is a backup image instead: build/backup/boot_b-downstream-2026-11-20.img). SSH 28 s after power-on._
 
 ## Phase 7: One-command build + guided flashing (half a day; copy Pixel 2 P9)
 - [ ] **P7.1** `scripts/build-all.sh` (hash-gated steps, as in the Pixel 2): submodules, container, kernel(s), initramfs, boot images, rootfs, firmware staging scripts.

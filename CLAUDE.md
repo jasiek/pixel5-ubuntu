@@ -50,9 +50,14 @@ project at `../ubuntu-touch-pixel2`; same methods, rules and lessons.
 - Always flash an explicit slot (`boot_a`, `vendor_boot_b`). Experiments with
   `vendor_boot` / `dtbo` go to the **inactive** slot only; the other slot is the
   way back (`fastboot --set-active=<slot>`).
-- `boot_b` holds our kernel (since 2026-11-19), flashed with an AVB hash footer
-  (`AVB_FOOTER=1 scripts/make-bootimg.sh`); without the footer the bootloader
-  refuses it, and then even `fastboot boot` fails. Restore Android with
+- `boot_b` holds our kernel, flashed with an AVB hash footer; without the
+  footer the bootloader refuses it, and then even `fastboot boot` fails.
+  Since 2026-11-20 (P6.5) that is **mainline**
+  (`scripts/build-mainline-test.sh default`, header v2 with its own DTB). Back
+  to downstream: `fastboot flash boot_b build/backup/boot_b-downstream-2026-11-20.img`
+  (header v3, uses `vendor_boot_b`; `AVB_FOOTER=1 scripts/make-bootimg.sh`
+  rebuilds it). A plain mainline reboot shows `bootreason=watchdog`: expected
+  (Test 32), not a hang. Restore Android with
   `fastboot flash boot_b firmware/boot.img` (and never boot it with Ubuntu on
   userdata).
 - Test tethered first with `fastboot boot`. Note: on redfin this still uses the
