@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         e2fsprogs dmsetup nano less htop usbutils file \
         unattended-upgrades \
         rmtfs tqftpserv qrtr-tools \
+        bluez \
     && rm -rf /var/lib/apt/lists/*
 
 COPY overlay/ /
@@ -32,7 +33,7 @@ RUN chmod 600 /etc/NetworkManager/system-connections/*.nmconnection \
         pixel5-firmware.service pd-mapper.service \
         rmtfs.service tqftpserv.service pixel5-wifi.service pixel5-wifi-ok.timer \
         pixel5-qgauge.service pixel5-charge-hold.service pixel5-alive.service \
-        pixel5-modem-rproc.service \
+        pixel5-modem-rproc.service pixel5-bt.service \
     # Host keys are generated on first boot (ssh.service drop-in).
     && rm -f /etc/ssh/ssh_host_* \
     # Fresh machine-id on first boot.

@@ -1,0 +1,1 @@
+/run/pixel5-fw/crbtfw32.tlv

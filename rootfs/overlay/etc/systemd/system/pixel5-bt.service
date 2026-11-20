@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+# Mainline only: rebind the WCN3991 once its firmware is reachable and
+# give it a BD address (see /usr/local/sbin/pixel5-bt).
+[Unit]
+Description=Bluetooth bring-up (mainline: WCN3991 firmware + BD address)
+ConditionKernelVersion=>=6
+After=pixel5-firmware.service
+Requires=pixel5-firmware.service
+Before=bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/pixel5-bt
+
+[Install]
+WantedBy=multi-user.target

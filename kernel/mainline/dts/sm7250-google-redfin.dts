@@ -46,6 +46,15 @@
 	 * tables, which qcom_qg needs. No voltage or current: qcom_smbx then
 	 * keeps the float voltage the bootloader set (4.45 V downstream).
 	 */
+	aliases {
+		/*
+		 * qcom_geni_serial numbers high-speed UARTs after the highest
+		 * serial alias; with none at all the port is refused ("Invalid
+		 * line -19", Test 99).
+		 */
+		serial1 = &uart5;
+	};
+
 	battery: battery {
 		compatible = "simple-battery";
 		charge-full-design-microamp-hours = <4169000>;
@@ -614,6 +623,75 @@
 	};
 
 	/*
+	 * QUP wrapper 0 (live DT qcom,qupv3_0_geni_se@8c0000, SMMU stream
+	 * 0x4e3). Only SE5 is described: SE1 (0x884000, GPIOs 0-3) belongs
+	 * to TrustZone, see &tlmm.
+	 */
+	qupv3_id_0: geniqup@8c0000 {
+		compatible = "qcom,geni-se-qup";
+		reg = <0x0 0x008c0000 0x0 0x6000>;
+		clock-names = "m-ahb", "s-ahb";
+		clocks = <&gcc GCC_QUPV3_WRAP_0_M_AHB_CLK>,
+			 <&gcc GCC_QUPV3_WRAP_0_S_AHB_CLK>;
+		iommus = <&apps_smmu 0x4e3 0x0>;
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * Bluetooth UART (live DT qcom,qup_uart@894000, SPI 606,
+		 * pins 38-41 function qup05; the TLMM 41 wakeup IRQ is left
+		 * out for now).
+		 */
+		uart5: serial@894000 {
+			compatible = "qcom,geni-uart";
+			reg = <0x0 0x00894000 0x0 0x4000>;
+			clock-names = "se";
+			clocks = <&gcc GCC_QUPV3_WRAP0_S5_CLK>;
+			interrupts = <GIC_SPI 606 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&rpmhpd RPMHPD_CX>;
+			operating-points-v2 = <&qup_opp_table>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&qup_uart5_cts>, <&qup_uart5_rts>,
+				    <&qup_uart5_tx>, <&qup_uart5_rx>;
+
+			/*
+			 * WCN3990 BT (live DT bt_wcn3990): io pm8150 S4,
+			 * xtal pm8150 L14, core pm8150a L2, PA pm8150a L10.
+			 * Firmware qca/crbtfw32.tlv + crnv32.bin (vendor).
+			 */
+			bluetooth {
+				compatible = "qcom,wcn3991-bt";
+				vddio-supply = <&vreg_s4a_1p8>;
+				vddxo-supply = <&vreg_l14a_1p88>;
+				vddrf-supply = <&vreg_l2c_1p3>;
+				vddch0-supply = <&vreg_l10c_3p3>;
+				max-speed = <3200000>;
+			};
+		};
+	};
+
+	/* QUP SE clock levels (as sm8250.dtsi) */
+	qup_opp_table: opp-table-qup {
+		compatible = "operating-points-v2";
+
+		opp-50000000 {
+			opp-hz = /bits/ 64 <50000000>;
+			required-opps = <&rpmhpd_opp_min_svs>;
+		};
+
+		opp-75000000 {
+			opp-hz = /bits/ 64 <75000000>;
+			required-opps = <&rpmhpd_opp_low_svs>;
+		};
+
+		opp-120000000 {
+			opp-hz = /bits/ 64 <120000000>;
+			required-opps = <&rpmhpd_opp_svs>;
+		};
+	};
+
+	/*
 	 * Adreno 620 (live DT qcom,kgsl-3d0@3d00000: regs, SPI 300, SMMU
 	 * stream 0 mask 0x401; RSCC at 0x3de0000). Only the two levels all
 	 * three downstream speed bins share: 400 MHz SVS, 275 MHz LOW_SVS
@@ -927,6 +1005,41 @@
 	 * the phone: each of the four alone does (Tests 66-81).
 	 */
 	gpio-reserved-ranges = <0 4>;
+
+	/*
+	 * Live DT qupv3_se5_{ctsrx,rts,tx}, except RX: pulled up as on the
+	 * mainline sc7180 Chromebooks (same WCN3991, same GPIOs 38-41). While
+	 * the module's TX is tri-stated (in-band sleep) a floating RX reads
+	 * garbage; with bias-disable the first command after ~1 min idle got
+	 * no reply and hci_qca crashed the chip (Test 99).
+	 */
+	qup_uart5_cts: qup-uart5-cts-state {
+		pins = "gpio38";
+		function = "qup05";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	qup_uart5_rx: qup-uart5-rx-state {
+		pins = "gpio41";
+		function = "qup05";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	qup_uart5_rts: qup-uart5-rts-state {
+		pins = "gpio39";
+		function = "qup05";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	qup_uart5_tx: qup-uart5-tx-state {
+		pins = "gpio40";
+		function = "qup05";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
 };
 
 &ufs_mem_hc {

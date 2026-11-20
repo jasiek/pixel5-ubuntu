@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: **Owner:** (1) look at the screen during a mainline boot: splash gone after ~30 s? (Tests 96–97: rails off, 100 mA less); (2) P6.5 needs your OK to flash mainline as default. Meanwhile P6.4: Bluetooth (hci_qca on WCN3990), haptics (DRV2624: the mainline alive signal). GPU done (Test 98).
+## ▶ RESUME HERE: **Owner:** (1) look at the screen during a mainline boot: splash gone after ~30 s? (Tests 96–97: rails off, 100 mA less); (2) P6.5 needs your OK to flash mainline as default. Meanwhile P6.4: haptics (DRV2624: the mainline alive signal), suspend. GPU (Test 98) and Bluetooth (Test 99) done.
 
 ---
 
@@ -123,7 +123,8 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
   - [ ] Panel S6E3HC2 DSC command mode: **new driver** from downstream DCS sequences
   - [ ] Touch S6SY79x: **SPI transport** for `s6sy761`; GPIO 35 to the AP
   - [ ] Audio: 2x CS35L41 (TDM) + RT5514 mics; watch for ADSP restarts every ~40 s
-  - [ ] Bluetooth (hci_qca), haptics (DRV2624: new driver), suspend (s2idle)
+  - [x] Bluetooth (hci_qca) _Done 2026-11-20 (Test 99): WCN3991 on QUP0 SE5, vendor firmware, NVM deep-sleep byte patched at boot (else wedges after idle and crashes WLAN), machine-id BD address._
+  - [ ] Haptics (DRV2624: new driver), suspend (s2idle)
 - [ ] **P6.5** (owner OK) Flash mainline as default on the active slot; downstream stays on the other.
 
 ## Phase 7: One-command build + guided flashing (half a day; copy Pixel 2 P9)

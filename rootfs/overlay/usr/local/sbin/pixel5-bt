@@ -1,0 +1,81 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Bluetooth bring-up on the mainline kernel (WCN3991 on hci_uart_qca).
+# 1. hci_uart binds at ~2.5 s, before pixel5-firmware.service has made
+#    the vendor firmware (qca/crbtfw32.tlv, crnv32u.bin) reachable; the
+#    failed setup leaves hci0 hidden from mgmt for good. Rebind it once
+#    the firmware is there (Test 99).
+#    The NVM (calibration + settings) is the vendor's crnv32u.bin with one
+#    byte changed: deep-sleep tag 27, data byte 4, 0x04 -> 0x00, as in
+#    linux-firmware's (ChromeOS) crnv32u.bin. With 0x04 the chip ignores
+#    host wake-ups after about a minute of sleep, hci_qca then crashes it
+#    for a dump, and that crash takes down the modem's WLAN too (Test 99).
+#    The patched copy is made in /run from the phone's own file.
+# 2. The controller then waits unconfigured: no BD address (none in the
+#    DT or on the cmdline; Android's BT HAL sets it). Give it a stable
+#    per-device address derived from /etc/machine-id, like the wifi
+#    stable MAC. It is never printed.
+set -eu
+drv=/sys/bus/serial/drivers/hci_uart_qca
+# btmgmt (BlueZ 5.72) never exits when stdin is /dev/null, as under
+# systemd (Test 99): give it a pipe, and a time limit.
+mgmt() { echo | timeout 10 btmgmt --index 0 "$@"; }
+
+# --- NVM: copy, find tag 27 (first type-2 tag set, as btqca), patch.
+nvm_src=/run/pixel5-fw/crnv32u.bin
+nvm=/run/pixel5-bt/crnv32u.bin
+u8() { od -An -tu1 -j "$2" -N1 "$1" | tr -d ' '; }
+u16() { echo $(( $(u8 "$1" "$2") | $(u8 "$1" $(($2 + 1))) << 8 )); }
+patch_nvm() {
+    f=$1 off=0
+    [ "$(u8 "$f" 0)" = 4 ] && off=4      # enclosing type-4 header
+    [ "$(u8 "$f" $off)" = 2 ] || { echo "bt: NVM: no type-2 tag set" >&2; return 1; }
+    len=$(( $(u8 "$f" $((off + 1))) | $(u8 "$f" $((off + 2))) << 8 | $(u8 "$f" $((off + 3))) << 16 ))
+    i=$((off + 4)) end=$((off + 4 + len))
+    while [ $((i + 12)) -le $end ]; do
+        tid=$(u16 "$f" $i) tlen=$(u16 "$f" $((i + 2)))
+        if [ "$tid" = 27 ] && [ "$tlen" -ge 5 ]; then
+            pos=$((i + 12 + 4))
+            case $(u8 "$f" $pos) in
+                0) echo "bt: NVM deep-sleep byte already 0x00" ;;
+                4) printf '\000' | dd of="$f" bs=1 seek=$pos conv=notrunc status=none
+                   echo "bt: NVM deep-sleep byte 0x04 -> 0x00" ;;
+                *) echo "bt: NVM deep-sleep byte unexpected, left as is" >&2 ;;
+            esac
+            return 0
+        fi
+        i=$((i + 12 + tlen))
+    done
+    echo "bt: NVM tag 27 not found" >&2
+}
+[ -r "$nvm_src" ] || { echo "bt: $nvm_src missing" >&2; exit 1; }
+install -D -m 644 "$nvm_src" "$nvm"
+patch_nvm "$nvm"
+
+n=0
+until dev=$(ls -d "$drv"/serial*-* 2>/dev/null | head -1) && [ -n "$dev" ]; do
+    n=$((n + 1))
+    [ $n -le 30 ] || { echo "bt: no hci_uart_qca device" >&2; exit 1; }
+    sleep 2
+done
+d=$(basename "$dev")
+[ -r /usr/lib/firmware/qca/crbtfw32.tlv ] || { echo "bt: firmware not reachable" >&2; exit 1; }
+echo "$d" > "$drv/unbind"
+echo "$d" > "$drv/bind"
+echo "bt: rebound $d"
+
+# Wait for setup (firmware download takes ~1 s) to expose the index.
+n=0
+until mgmt config 2>/dev/null | grep -q "supported options"; do
+    n=$((n + 1))
+    [ $n -le 30 ] || { echo "bt: hci0 did not come up" >&2; exit 1; }
+    sleep 1
+done
+if mgmt config | grep -q "missing options:.*public-address"; then
+    h=$(printf 'pixel5-bt-%s' "$(cat /etc/machine-id)" | sha256sum | cut -c1-12)
+    # First octet: unicast, locally administered (bit 1 set, bit 0 clear).
+    o1=$(( (0x$(echo "$h" | cut -c1-2) & 0xfc) | 0x02 ))
+    addr=$(printf '%02X' "$o1"; echo "$h" | cut -c3-12 | sed 's/../:&/g' | tr a-f A-F)
+    mgmt public-addr "$addr" >/dev/null
+    echo "bt: public address set (machine-id derived)"
+fi
