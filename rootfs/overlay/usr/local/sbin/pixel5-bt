@@ -53,14 +53,20 @@ install -D -m 644 "$nvm_src" "$nvm"
 patch_nvm "$nvm"
 
 n=0
-until dev=$(ls -d "$drv"/serial*-* 2>/dev/null | head -1) && [ -n "$dev" ]; do
+# The serdev device of the BT node, bound or not (found by its compatible;
+# the hci_uart module may still be loading).
+find_dev() {
+    for p in /sys/bus/serial/devices/serial*-*; do
+        grep -q "wcn399" "$p/modalias" 2>/dev/null && { basename "$p"; return; }
+    done
+}
+until d=$(find_dev) && [ -n "$d" ] && [ -d "$drv" ]; do
     n=$((n + 1))
-    [ $n -le 30 ] || { echo "bt: no hci_uart_qca device" >&2; exit 1; }
+    [ $n -le 30 ] || { echo "bt: no WCN399x serdev device / hci_uart_qca" >&2; exit 1; }
     sleep 2
 done
-d=$(basename "$dev")
 [ -r /usr/lib/firmware/qca/crbtfw32.tlv ] || { echo "bt: firmware not reachable" >&2; exit 1; }
-echo "$d" > "$drv/unbind"
+[ -e "$drv/$d" ] && echo "$d" > "$drv/unbind"
 echo "$d" > "$drv/bind"
 echo "bt: rebound $d"
 
