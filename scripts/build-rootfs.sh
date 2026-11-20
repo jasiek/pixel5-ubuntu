@@ -62,19 +62,25 @@ chmod 644 "$R/etc/hostname" "$R/etc/hosts"
 rm -f "$R/etc/resolv.conf"
 ln -s ../run/systemd/resolve/stub-resolv.conf "$R/etc/resolv.conf"
 
-# Kernel modules built by scripts/build-kernel.sh.
-KREL=none
-MODS=build/kernel/modules-install/lib/modules
-if [ -d "$MODS" ]; then
-    KREL=$(ls "$MODS")
-    mkdir -p "$R/lib/modules"
-    cp -a "$MODS/$KREL" "$R/lib/modules/"
-    rm -f "$R/lib/modules/$KREL/build" "$R/lib/modules/$KREL/source"
-    depmod -b "$R" "$KREL"
-    echo "kernel modules $KREL included"
-else
-    echo "no kernel modules (stock kernel, or build-kernel.sh not run)"
-fi
+# Kernel modules: downstream 4.19 (scripts/build-kernel.sh) and mainline
+# (MODULES=1 scripts/build-mainline.sh; the default kernel on boot_b).
+# Each kernel loads only its own release's directory.
+KREL=""
+for MODS in build/kernel/modules-install/lib/modules \
+            build/mainline/out/modules-install/lib/modules; do
+    [ -d "$MODS" ] || continue
+    for k in $(ls "$MODS"); do
+        mkdir -p "$R/lib/modules"
+        cp -a "$MODS/$k" "$R/lib/modules/"
+        rm -f "$R/lib/modules/$k/build" "$R/lib/modules/$k/source"
+        depmod -b "$R" "$k"
+        echo "kernel modules $k included"
+        KREL="$KREL $k"
+    done
+done
+[ -n "$KREL" ] || echo "no kernel modules (build-kernel.sh / build-mainline.sh not run)"
+KREL=${KREL# }
+
 # A/B slot marking (scripts/build-qbootctl.sh, pixel5-boot-successful.service).
 install -m 755 build/qbootctl/qbootctl "$R/usr/local/sbin/qbootctl"
 # Modem helpers built from external/ (scripts/build-qcom-daemons.sh).
@@ -102,7 +108,7 @@ else
     echo "no wifi profile (build/wifi.ssid empty or missing)"
 fi
 
-echo "built $(date -u +%FT%TZ) kernel $KREL" > "$R/etc/pixel5-build"
+echo "built $(date -u +%FT%TZ) kernels $KREL" > "$R/etc/pixel5-build"
 
 # The same tree as a tar, for the tethered test from RAM (P3.3:
 # scripts/ramroot.sh unpacks it into a tmpfs on the phone; nothing flashed).
