@@ -1,0 +1,30 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Test helper (Test 122): serve the ADSP sensor PD with Qualcomm's
+# adsprpcd, which opens the paths the DSP names as-is. Everything it may
+# write is a tmpfs copy: the real persist partition is mounted read-only.
+set -eu
+P=/run/pixel5-persist
+mkdir -p /run/persist-ro $P /mnt/vendor/persist /data/vendor/sensors
+mountpoint -q /run/persist-ro || mount -o ro,noload /dev/disk/by-partlabel/persist /run/persist-ro
+if ! mountpoint -q $P; then
+    mount -t tmpfs -o mode=0755,size=16m pixel5-persist $P
+    mkdir -p $P/sensors/registry
+    cp -a /run/persist-ro/sensors/registry/registry /run/persist-ro/sensors/registry/factory_data $P/sensors/registry/
+fi
+mountpoint -q /mnt/vendor/persist || mount --bind $P /mnt/vendor/persist
+# Downstream /sys/devices/soc0 values (docs/device-info.md).
+S=/run/pixel5-soc0
+if ! mountpoint -q /sys/devices/soc0; then
+    mkdir -p $S
+    w() { printf '%s\n' "$2" > $S/$1; }
+    w soc_id 400; w revision 2.0; w machine LITO; w family Snapdragon
+    w hw_platform MTP; w platform_subtype Unknown; w platform_subtype_id 0
+    w platform_version 65536
+    w g_hw_platform OEM; w g_platform_subtype_id 2; w g_platform_version 720936
+    mount --bind $S /sys/devices/soc0
+fi
+/usr/local/sbin/pixel5-rproc adsp start
+n=0; until [ -e /dev/fastrpc-adsp ] || [ $n -ge 50 ]; do sleep 0.1; n=$((n + 1)); done
+systemd-run --unit=qrpc-sensors --collect /usr/sbin/adsprpcd sensorspd adsp
+systemd-run --unit=qrpc-root --collect /usr/sbin/adsprpcd

@@ -43,3 +43,6 @@
 [submodule "external/hexagonrpc"]
 	path = external/hexagonrpc
 	url = https://github.com/linux-msm/hexagonrpc
+[submodule "external/fastrpc"]
+	path = external/fastrpc
+	url = https://github.com/qualcomm/fastrpc

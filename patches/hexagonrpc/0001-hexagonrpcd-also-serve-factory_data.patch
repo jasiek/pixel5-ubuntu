@@ -1,0 +1,71 @@
+From 3d972db1d3a3ed372789a5f77bccecc47c519625 Mon Sep 17 00:00:00 2001
+From: Jan Szumiec <noreply@localhost>
+Date: Fri, 20 Nov 2026 15:24:39 +0100
+Subject: [PATCH] hexagonrpcd: also serve persist/sensors/registry/factory_data
+
+SPDX-License-Identifier: GPL-3.0-or-later
+The redfin ADSP sensor PD reads its factory calibration from
+/mnt/vendor/persist/sensors/registry/factory_data. Map it like the
+registry, from <prefix>/sensors/factory_data/ (empty if missing).
+
+Applies to linux-msm/hexagonrpc v0.5.0 (435ed1c).
+---
+ hexagonrpcd/rpcd_builder.c | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/hexagonrpcd/rpcd_builder.c b/hexagonrpcd/rpcd_builder.c
+index d374958..dc0f409 100644
+--- a/hexagonrpcd/rpcd_builder.c
++++ b/hexagonrpcd/rpcd_builder.c
+@@ -30,6 +30,7 @@
+ #define DSP_LIBS		"/dsp/"
+ #define SENSORS_CONFIG		"/sensors/config/"
+ #define SENSORS_REGISTRY	"/sensors/registry/"
++#define SENSORS_FACTORY		"/sensors/factory_data/"
+ #define SNS_REG_CONFIG		"/sensors/sns_reg.conf"
+ #define SYSFS_SOCINFO		"/socinfo/"
+ 
+@@ -111,7 +112,7 @@ static struct hexagonfs_dirent *hfs_map_or_empty(const char *name, const char *p
+  */
+ struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
+ {
+-	char *acdbdata, *dsp_libs, *sns_cfg, *sns_reg, *sns_reg_config, *socinfo;
++	char *acdbdata, *dsp_libs, *sns_cfg, *sns_fac, *sns_reg, *sns_reg_config, *socinfo;
+ 	size_t n_prefix;
+ 	struct hexagonfs_dirent *persist_dir, *vendor_dir;
+ 
+@@ -120,6 +121,7 @@ struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
+ 	acdbdata = malloc(n_prefix + strlen(ACDBDATA) + 1);
+ 	sns_cfg = malloc(n_prefix + strlen(SENSORS_CONFIG) + 1);
+ 	sns_reg = malloc(n_prefix + strlen(SENSORS_REGISTRY) + 1);
++	sns_fac = malloc(n_prefix + strlen(SENSORS_FACTORY) + 1);
+ 	sns_reg_config = malloc(n_prefix + strlen(SNS_REG_CONFIG) + 1);
+ 	socinfo = malloc(n_prefix + strlen(SYSFS_SOCINFO) + 1);
+ 
+@@ -140,6 +142,11 @@ struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
+ 		strcat(sns_reg, SENSORS_REGISTRY);
+ 	}
+ 
++	if (sns_fac != NULL) {
++		strcpy(sns_fac, prefix);
++		strcat(sns_fac, SENSORS_FACTORY);
++	}
++
+ 	if (sns_reg_config != NULL) {
+ 		strcpy(sns_reg_config, prefix);
+ 		strcat(sns_reg_config, SNS_REG_CONFIG);
+@@ -162,8 +169,9 @@ struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
+ 	 */
+ 	persist_dir = hfs_mkdir("persist", 1,
+ 				hfs_mkdir("sensors", 1,
+-					hfs_mkdir("registry", 1,
+-						hfs_map("registry", sns_reg)
++					hfs_mkdir("registry", 2,
++						hfs_map("registry", sns_reg),
++						hfs_map_or_empty("factory_data", sns_fac)
+ 					)
+ 				)
+ 		      );
+-- 
+2.50.1 (Apple Git-155)
+

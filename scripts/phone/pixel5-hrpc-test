@@ -1,0 +1,25 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Test helper (Test 121): build the hexagonrpcd root in /run, start the
+# ADSP, then the sensors and root PD servers. Nothing leaves the phone.
+set -eu
+R=/run/hexagonrpc
+BIN=${BIN:-/usr/local/bin/hexagonrpcd-fac}
+mkdir -p $R/sensors $R/dsp $R/socinfo /run/persist-ro
+mountpoint -q /run/persist-ro || mount -o ro,noload /dev/disk/by-partlabel/persist /run/persist-ro
+ln -sfn /vendor/etc/sensors/config $R/sensors/config
+ln -sfn /run/persist-ro/sensors/registry/registry $R/sensors/registry
+ln -sfn /run/persist-ro/sensors/registry/factory_data $R/sensors/factory_data
+ln -sfn /vendor/etc/sensors/sns_reg_config $R/sensors/sns_reg.conf
+ln -sfn /vendor/dsp/adsp $R/dsp/adsp
+ln -sfn /vendor/etc/acdbdata $R/acdb
+# Downstream /sys/devices/soc0 values (docs/device-info.md).
+w() { printf '%s\n' "$2" > $R/socinfo/$1; }
+w soc_id 400; w revision 2.0; w machine LITO; w family Snapdragon
+w hw_platform MTP; w platform_subtype Unknown; w platform_subtype_id 0
+w platform_version 65536
+w g_hw_platform OEM; w g_platform_subtype_id 2; w g_platform_version 720936
+/usr/local/sbin/pixel5-rproc adsp start
+n=0; until [ -e /dev/fastrpc-adsp ] || [ $n -ge 50 ]; do sleep 0.1; n=$((n + 1)); done
+systemd-run --unit=hrpc-sensors --collect $BIN -f /dev/fastrpc-adsp -d adsp -s -R $R
+systemd-run --unit=hrpc-root --collect $BIN -f /dev/fastrpc-adsp -d adsp -R $R
