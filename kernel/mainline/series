@@ -60,8 +60,19 @@ nairo 0036-drm-msm-a6xx-Add-A620-support.patch
 # (0088, the node, sits on nairo's other DT patches: node in our board DTS)
 nairo 0086-dt-bindings-clock-qcom-Add-SM7250-display-clock-cont.patch
 nairo 0087-clk-qcom-dispcc-sm8250-Add-SM7250-support.patch
+# P6.4 display, stage B: MDSS/DPU/DSI support for SM7250 (bindings, DPU
+# catalog with 2 DSC blocks, MDSS, SMMU client). 0098, the nodes, is in
+# our board DTS like 0088; 0092/0096/0097/0099/0100 are nairo's LCD panel.
+nairo 0090-dt-bindings-display-msm-Add-SM7250-MDSS.patch
+nairo 0091-dt-bindings-regulator-qcom-sdm845-refgen-regulator-A.patch
+nairo 0093-drm-msm-dpu-Add-support-for-SM7250.patch
+nairo 0094-drm-msm-mdss-Add-SM7250-support.patch
+nairo 0095-iommu-arm-smmu-qcom-Add-SM7250-MDSS.patch
 # optional (suspend only): nairo 0112-usb-dwc3-qcom-Reapply-UTMI-pipe-clk-on-resume.patch
 # Bring-up aid (ours, GPL-2.0-only like the kernel): pixel5.reset_at=N
 local 0001-LOCAL-arm64-pixel5.reset_at-N-boot-stage-probe.patch
 # P6.4 haptics: minimal DRV2624 RTP rumble driver (ours)
 local 0002-LOCAL-Input-add-a-minimal-TI-DRV2624-haptics-driver.patch
+# P6.4 display: Samsung S6E3HC2 DSC command-mode panel, generated from the
+# downstream panel DT (scripts/gen-panel-driver.sh)
+local 0004-LOCAL-drm-panel-add-the-Samsung-S6E3HC2-DSC-command-.patch
