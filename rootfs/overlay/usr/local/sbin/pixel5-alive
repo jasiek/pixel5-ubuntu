@@ -4,13 +4,22 @@
 #   2 short buzzes: booted, wlan0 connected (SSH over wifi works)
 #   1 long buzz:    booted, but no wifi after 90 s (use USB: 172.16.42.1)
 #   pixel5-alive buzz <ms>    one pulse, for testing
-# The DRV2624 (drv2624.ko) is an LED-class device in real-time mode:
-# brightness 1 starts the motor, 0 stops it.
+# Downstream 4.19: the DRV2624 (drv2624.ko) is an LED-class device in
+# real-time mode: brightness 1 starts the motor, 0 stops it.
+# Mainline: our drv2624 driver is a force-feedback input device
+# ("drv2624-haptics"), played with pixel5-rumble.
 V=/sys/class/leds/vibrator/brightness
-buzz() { echo 1 > "$V"; sleep "$1"; echo 0 > "$V"; }
+ff() { grep -qx drv2624-haptics /sys/class/input/event*/device/name 2>/dev/null; }
+buzz() {   # <seconds>
+    if [ -w "$V" ]; then
+        echo 1 > "$V"; sleep "$1"; echo 0 > "$V"
+    else
+        pixel5-rumble "$(echo "$1" | awk '{printf "%d", $1 * 1000}')"
+    fi
+}
 if [ "${1:-}" = buzz ]; then buzz "$(echo "${2:-200}" | awk '{print $1/1000}')"; exit; fi
-for i in $(seq 1 90); do [ -w "$V" ] && break; sleep 1; done
-[ -w "$V" ] || { echo "no vibrator device"; exit 0; }
+for i in $(seq 1 90); do { [ -w "$V" ] || ff; } && break; sleep 1; done
+[ -w "$V" ] || ff || { echo "no vibrator device"; exit 0; }
 for i in $(seq 1 90); do
     if nmcli -t -f DEVICE,STATE dev 2>/dev/null | grep -qx "wlan0:connected"; then
         echo "wifi connected after ~${i} s: 2 short buzzes"

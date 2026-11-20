@@ -5,6 +5,13 @@
 # plus a few Docker tweaks, and already has user `ubuntu` (uid 1000, sudo).
 # Headless first: no camera/GPU/audio userspace until those phases. The GPU
 # works on mainline (Test 98); Mesa is an `apt install` away, not in the image.
+# Small helpers in C, built in a throwaway stage (no compiler in the image).
+FROM ubuntu:24.04 AS tools
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY tools/ /src/
+RUN gcc -O2 -Wall -Werror -o /pixel5-rumble /src/pixel5-rumble.c
+
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -22,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY overlay/ /
+COPY --from=tools /pixel5-rumble /usr/local/bin/pixel5-rumble
 
 RUN chmod 600 /etc/NetworkManager/system-connections/*.nmconnection \
     && chmod 440 /etc/sudoers.d/ubuntu \

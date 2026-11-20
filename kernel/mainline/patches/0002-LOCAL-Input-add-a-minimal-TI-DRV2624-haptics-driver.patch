@@ -1,0 +1,375 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Fri, 20 Nov 2026 08:04:39 +0000
+Subject: [PATCH] LOCAL: Input: add a minimal TI DRV2624 haptics driver
+
+The Pixel 5 vibration motor is an LRA on a TI DRV2624, which mainline
+does not support. This drives it in real-time playback (RTP) mode
+through the input force-feedback interface (FF_RUMBLE), with the
+actuator setup of Google's downstream driver (redbull kernel,
+drivers/input/misc/drv2624.c, GPL-2.0) and the same "ti,*" device-tree
+properties. No waveform RAM, calibration or interrupt.
+
+Not for upstream as is: it needs a binding, and the properties would
+want proper units.
+
+Signed-off-by: pixel5 <pixel5@localhost>
+---
+ drivers/input/misc/Kconfig   |  13 ++
+ drivers/input/misc/Makefile  |   1 +
+ drivers/input/misc/drv2624.c | 307 +++++++++++++++++++++++++++++++++++
+ 3 files changed, 321 insertions(+)
+ create mode 100644 drivers/input/misc/drv2624.c
+
+diff --git a/drivers/input/misc/Kconfig b/drivers/input/misc/Kconfig
+index 169768e3d..9f4dcbdd4 100644
+--- a/drivers/input/misc/Kconfig
++++ b/drivers/input/misc/Kconfig
+@@ -941,6 +941,19 @@ config INPUT_DRV260X_HAPTICS
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called drv260x-haptics.
+ 
++config INPUT_DRV2624_HAPTICS
++	tristate "TI DRV2624 haptics support"
++	depends on INPUT && I2C
++	depends on GPIOLIB || COMPILE_TEST
++	select INPUT_FF_MEMLESS
++	select REGMAP_I2C
++	help
++	  Say Y to enable support for the TI DRV2624 haptics driver
++	  (LRA rumble in real-time playback mode).
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called drv2624.
++
+ config INPUT_DRV2665_HAPTICS
+ 	tristate "TI DRV2665 haptics support"
+ 	depends on INPUT && I2C
+diff --git a/drivers/input/misc/Makefile b/drivers/input/misc/Makefile
+index 1339619f0..d4535dfc5 100644
+--- a/drivers/input/misc/Makefile
++++ b/drivers/input/misc/Makefile
+@@ -38,6 +38,7 @@ obj-$(CONFIG_INPUT_DA9055_ONKEY)	+= da9055_onkey.o
+ obj-$(CONFIG_INPUT_DA9063_ONKEY)	+= da9063_onkey.o
+ obj-$(CONFIG_INPUT_E3X0_BUTTON)		+= e3x0-button.o
+ obj-$(CONFIG_INPUT_DRV260X_HAPTICS)	+= drv260x.o
++obj-$(CONFIG_INPUT_DRV2624_HAPTICS)	+= drv2624.o
+ obj-$(CONFIG_INPUT_DRV2665_HAPTICS)	+= drv2665.o
+ obj-$(CONFIG_INPUT_DRV2667_HAPTICS)	+= drv2667.o
+ obj-$(CONFIG_INPUT_GPIO_BEEPER)		+= gpio-beeper.o
+diff --git a/drivers/input/misc/drv2624.c b/drivers/input/misc/drv2624.c
+new file mode 100644
+index 000000000..d8802adf8
+--- /dev/null
++++ b/drivers/input/misc/drv2624.c
+@@ -0,0 +1,307 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * TI DRV2624 haptic driver, minimal: LRA rumble in real-time-playback
++ * (RTP) mode through the input force-feedback (FF_RUMBLE) interface.
++ *
++ * Register map and actuator setup follow Google's downstream driver for
++ * the Pixel 5 (redbull kernel, drivers/input/misc/drv2624.c, GPL-2.0),
++ * reading the same "ti,*" device-tree properties. No waveform RAM, no
++ * calibration, no interrupt: the tuning values in the DT are used as is.
++ */
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/regmap.h>
++#include <linux/workqueue.h>
++
++#define DRV2624_REG_ID			0x00
++#define DRV2624_REG_STATUS		0x01
++#define DRV2624_REG_MODE		0x07
++#define  DRV2624_MODE_MASK		0x03
++#define  DRV2624_MODE_RTP		0x00
++#define  DRV2624_PINFUNC_MASK		0x0c
++#define  DRV2624_PINFUNC_INT		(0x02 << 2)
++#define DRV2624_REG_CONTROL1		0x08
++#define  DRV2624_ACTUATOR_LRA		BIT(7)
++#define  DRV2624_LOOP_OPEN		BIT(6)
++#define  DRV2624_AUTOBRK_OK		BIT(4)
++#define DRV2624_REG_GO			0x0c
++#define DRV2624_REG_CONTROL2		0x0d
++#define DRV2624_REG_RTP_INPUT		0x0e
++#define DRV2624_REG_RATED_VOLTAGE	0x1f
++#define DRV2624_REG_OD_CLAMP		0x20
++#define DRV2624_REG_CAL_COMP		0x21
++#define DRV2624_REG_CAL_BEMF		0x22
++#define DRV2624_REG_LOOP_CONTROL	0x23
++#define DRV2624_REG_DRIVE_TIME		0x27
++#define  DRV2624_DRIVE_TIME_MASK	0x1f
++#define  DRV2624_MINFREQ_SEL_45HZ	BIT(7)
++#define DRV2624_REG_BLK_IDISS_TIME	0x28
++#define DRV2624_REG_ZC_OD_TIME		0x29
++#define DRV2624_REG_LRA_OL_CTRL		0x2c
++#define DRV2624_REG_OL_PERIOD_H		0x2e
++#define DRV2624_REG_OL_PERIOD_L		0x2f
++
++/* RTP level for a full-magnitude rumble (signed full scale). */
++#define DRV2624_RTP_MAX			0x7f
++
++struct drv2624 {
++	struct device *dev;
++	struct regmap *regmap;
++	struct gpio_desc *reset;
++	struct input_dev *input;
++	struct work_struct work;
++	u8 level;
++};
++
++static const struct regmap_config drv2624_regmap = {
++	.reg_bits = 8,
++	.val_bits = 8,
++	.max_register = 0xff,
++	.cache_type = REGCACHE_NONE,
++};
++
++static int drv2624_prop(struct drv2624 *d, const char *name, u32 *val)
++{
++	return of_property_read_u32(d->dev->of_node, name, val);
++}
++
++/* Optional property `name` into the `mask` bits of `reg`, shifted left. */
++static int drv2624_prop_bits(struct drv2624 *d, const char *name,
++			     unsigned int reg, unsigned int mask, int shift)
++{
++	u32 v;
++
++	if (drv2624_prop(d, name, &v))
++		return 0;
++	return regmap_update_bits(d->regmap, reg, mask, (v << shift) & mask);
++}
++
++/* Actuator setup, as the downstream dev_init_platform_data(). */
++static int drv2624_setup(struct drv2624 *d)
++{
++	struct regmap *r = d->regmap;
++	u32 actuator = 1, loop = 1, v, freq;
++	unsigned int ctrl1, drive_time, ol_period;
++	int ret;
++
++	drv2624_prop(d, "ti,actuator", &actuator);	/* 0 ERM, 1 LRA */
++	drv2624_prop(d, "ti,smart-loop", &loop);	/* 0 closed, 1 open */
++
++	ret = regmap_update_bits(r, DRV2624_REG_MODE, DRV2624_PINFUNC_MASK,
++				 DRV2624_PINFUNC_INT);
++	if (ret)
++		return ret;
++
++	ctrl1 = DRV2624_AUTOBRK_OK;
++	if (actuator & 1)
++		ctrl1 |= DRV2624_ACTUATOR_LRA;
++	if (loop & 1)
++		ctrl1 |= DRV2624_LOOP_OPEN;
++	ret = regmap_update_bits(r, DRV2624_REG_CONTROL1,
++				 DRV2624_ACTUATOR_LRA | DRV2624_LOOP_OPEN |
++				 DRV2624_AUTOBRK_OK, ctrl1);
++	if (ret)
++		return ret;
++
++	if (drv2624_prop(d, "ti,rated-voltage", &v) || !v)
++		return dev_err_probe(d->dev, -EINVAL, "no ti,rated-voltage\n");
++	ret = regmap_write(r, DRV2624_REG_RATED_VOLTAGE, v);
++	if (ret)
++		return ret;
++	if (drv2624_prop(d, "ti,odclamp-voltage", &v) || !v)
++		return dev_err_probe(d->dev, -EINVAL, "no ti,odclamp-voltage\n");
++	ret = regmap_write(r, DRV2624_REG_OD_CLAMP, v);
++	if (ret)
++		return ret;
++
++	if ((actuator & 1) && !drv2624_prop(d, "ti,lra-frequency", &freq) &&
++	    freq > 0 && freq < 1000) {
++		drive_time = 5 * (1000 - freq) / freq;
++		if (freq < 125)
++			drive_time |= DRV2624_MINFREQ_SEL_45HZ;
++		ret = regmap_update_bits(r, DRV2624_REG_DRIVE_TIME,
++					 DRV2624_DRIVE_TIME_MASK |
++					 DRV2624_MINFREQ_SEL_45HZ, drive_time);
++		if (ret)
++			return ret;
++
++		drv2624_prop(d, "ti,ol-lra-frequency", &freq);
++		ol_period = 1000000000U / (24615U * freq);
++		ret = regmap_update_bits(r, DRV2624_REG_OL_PERIOD_H, 0x03,
++					 (ol_period >> 8) & 0x03);
++		if (!ret)
++			ret = regmap_write(r, DRV2624_REG_OL_PERIOD_L,
++					   ol_period & 0xff);
++		if (!ret)
++			ret = drv2624_prop_bits(d, "ti,lra-wave-shape",
++						DRV2624_REG_LRA_OL_CTRL, 0x01, 0);
++		if (ret)
++			return ret;
++	}
++
++	if (!drv2624_prop(d, "ti,voltage-comp", &v))
++		ret = regmap_write(r, DRV2624_REG_CAL_COMP, v);
++	if (!ret && !drv2624_prop(d, "ti,bemf-factor", &v))
++		ret = regmap_write(r, DRV2624_REG_CAL_BEMF, v);
++	if (!ret)
++		ret = drv2624_prop_bits(d, "ti,bemf-gain",
++					DRV2624_REG_LOOP_CONTROL, 0x03, 0);
++	/* Downstream writes the raw value into the mask, no shift. */
++	if (!ret)
++		ret = drv2624_prop_bits(d, "ti,loop-gain",
++					DRV2624_REG_LOOP_CONTROL, 0x0c, 0);
++	if (!ret)
++		ret = drv2624_prop_bits(d, "ti,fb-brake-factor",
++					DRV2624_REG_LOOP_CONTROL, 0x70, 0);
++	if (!ret)
++		ret = drv2624_prop_bits(d, "ti,blanking-time",
++					DRV2624_REG_BLK_IDISS_TIME, 0xf0, 4);
++	if (!ret)
++		ret = drv2624_prop_bits(d, "ti,idiss-time",
++					DRV2624_REG_BLK_IDISS_TIME, 0x0f, 0);
++	if (!ret)
++		ret = drv2624_prop_bits(d, "ti,zc-det-time",
++					DRV2624_REG_ZC_OD_TIME, 0x03, 0);
++	if (!ret)
++		ret = drv2624_prop_bits(d, "ti,waveform-interval",
++					DRV2624_REG_CONTROL2, 0x20, 5);
++	if (ret)
++		return ret;
++
++	return regmap_update_bits(r, DRV2624_REG_MODE, DRV2624_MODE_MASK,
++				  DRV2624_MODE_RTP);
++}
++
++static void drv2624_work(struct work_struct *work)
++{
++	struct drv2624 *d = container_of(work, struct drv2624, work);
++	int ret;
++
++	if (d->level) {
++		ret = regmap_write(d->regmap, DRV2624_REG_RTP_INPUT, d->level);
++		if (!ret)
++			ret = regmap_write(d->regmap, DRV2624_REG_GO, 1);
++	} else {
++		ret = regmap_write(d->regmap, DRV2624_REG_GO, 0);
++	}
++	if (ret)
++		dev_err(d->dev, "playback %s failed: %d\n",
++			d->level ? "start" : "stop", ret);
++}
++
++static int drv2624_play(struct input_dev *input, void *data,
++			struct ff_effect *effect)
++{
++	struct drv2624 *d = input_get_drvdata(input);
++	unsigned int mag = max(effect->u.rumble.strong_magnitude,
++			       effect->u.rumble.weak_magnitude);
++
++	d->level = DIV_ROUND_UP(mag * DRV2624_RTP_MAX, 0xffff);
++	schedule_work(&d->work);
++	return 0;
++}
++
++static void drv2624_close(struct input_dev *input)
++{
++	struct drv2624 *d = input_get_drvdata(input);
++
++	cancel_work_sync(&d->work);
++	regmap_write(d->regmap, DRV2624_REG_GO, 0);
++}
++
++static void drv2624_hold_reset(void *data)
++{
++	struct drv2624 *d = data;
++
++	regmap_write(d->regmap, DRV2624_REG_GO, 0);
++	gpiod_set_value_cansleep(d->reset, 1);
++}
++
++static int drv2624_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct drv2624 *d;
++	unsigned int id;
++	int ret;
++
++	d = devm_kzalloc(dev, sizeof(*d), GFP_KERNEL);
++	if (!d)
++		return -ENOMEM;
++	d->dev = dev;
++	INIT_WORK(&d->work, drv2624_work);
++
++	d->regmap = devm_regmap_init_i2c(client, &drv2624_regmap);
++	if (IS_ERR(d->regmap))
++		return PTR_ERR(d->regmap);
++
++	/* NRST: pulse, then out of reset (t(on) = 1 ms). */
++	d->reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(d->reset))
++		return dev_err_probe(dev, PTR_ERR(d->reset), "reset gpio\n");
++	usleep_range(1000, 2000);
++	gpiod_set_value_cansleep(d->reset, 0);
++	usleep_range(1000, 2000);
++
++	ret = regmap_read(d->regmap, DRV2624_REG_ID, &id);
++	if (ret)
++		return dev_err_probe(dev, ret, "no reply at 0x%02x\n",
++				     client->addr);
++	/* Downstream checks the high nibble only: 0 for the DRV2624. */
++	if (id & 0xf0)
++		return dev_err_probe(dev, -ENODEV, "unexpected ID 0x%02x\n", id);
++
++	ret = devm_add_action_or_reset(dev, drv2624_hold_reset, d);
++	if (ret)
++		return ret;
++
++	ret = drv2624_setup(d);
++	if (ret)
++		return dev_err_probe(dev, ret, "setup failed\n");
++
++	d->input = devm_input_allocate_device(dev);
++	if (!d->input)
++		return -ENOMEM;
++	d->input->name = "drv2624-haptics";
++	d->input->close = drv2624_close;
++	input_set_drvdata(d->input, d);
++	input_set_capability(d->input, EV_FF, FF_RUMBLE);
++
++	ret = input_ff_create_memless(d->input, NULL, drv2624_play);
++	if (ret)
++		return ret;
++	ret = input_register_device(d->input);
++	if (ret)
++		return ret;
++
++	dev_info(dev, "DRV2624 ID 0x%02x, RTP rumble\n", id);
++	return 0;
++}
++
++static const struct of_device_id drv2624_of_match[] = {
++	{ .compatible = "ti,drv2624" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, drv2624_of_match);
++
++static const struct i2c_device_id drv2624_id[] = {
++	{ "drv2624" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, drv2624_id);
++
++static struct i2c_driver drv2624_driver = {
++	.driver = {
++		.name = "drv2624",
++		.of_match_table = drv2624_of_match,
++	},
++	.probe = drv2624_probe,
++	.id_table = drv2624_id,
++};
++module_i2c_driver(drv2624_driver);
++
++MODULE_DESCRIPTION("TI DRV2624 haptics (RTP rumble)");
++MODULE_LICENSE("GPL");
+-- 
+2.43.0
+

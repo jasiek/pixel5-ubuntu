@@ -997,6 +997,59 @@
 	status = "okay";
 };
 
+&qupv3_id_1 {
+	/* Live DT qcom,qupv3_1_geni_se@9c0000: SMMU stream 0x23 */
+	iommus = <&apps_smmu 0x23 0x0>;
+
+	/*
+	 * Live DT i2c@98c000 (QUP1 SE3, SPI 356, 400 kHz, GPIOs 46/47).
+	 * It also carries both CS35L41 amps, the FSA4480, the P9382
+	 * wireless charger, an EEPROM, the SLG51000 camera PMIC and two
+	 * PAC193x monitors: only the haptics driver is described, and the
+	 * bus is never scanned.
+	 */
+	i2c9: i2c@98c000 {
+		compatible = "qcom,geni-i2c";
+		reg = <0x0 0x0098c000 0x0 0x4000>;
+		clock-names = "se";
+		clocks = <&gcc GCC_QUPV3_WRAP1_S3_CLK>;
+		interrupts = <GIC_SPI 356 IRQ_TYPE_LEVEL_HIGH>;
+		power-domains = <&rpmhpd RPMHPD_CX>;
+		operating-points-v2 = <&qup_opp_table>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&qup_i2c9_default>;
+		clock-frequency = <400000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * Live DT drv2624@5a: NRST on PM7250B GPIO 1, LRA, open loop.
+		 * The ti,* tuning values are copied as they are.
+		 */
+		haptics@5a {
+			compatible = "ti,drv2624";
+			reg = <0x5a>;
+			reset-gpios = <&pm7250b_gpios 1 GPIO_ACTIVE_LOW>;
+			ti,smart-loop = <1>;
+			ti,actuator = <1>;
+			ti,rated-voltage = <0x6d>;
+			ti,odclamp-voltage = <0xa1>;
+			ti,lra-frequency = <172>;
+			ti,ol-lra-frequency = <155>;
+			ti,bemf-factor = <0x96>;
+			ti,bemf-gain = <0>;
+			ti,loop-gain = <0>;
+			ti,voltage-comp = <0x12>;
+			ti,blanking-time = <2>;
+			ti,idiss-time = <2>;
+			ti,zc-det-time = <0>;
+			ti,lra-wave-shape = <1>;
+			ti,waveform-interval = <1>;
+			ti,fb-brake-factor = <0>;
+		};
+	};
+};
+
 &tlmm {
 	/*
 	 * GPIOs 0-3 are the QUP SE1 SPI bus (lito-pinctrl qupv3_se1_spi),
@@ -1005,6 +1058,14 @@
 	 * the phone: each of the four alone does (Tests 66-81).
 	 */
 	gpio-reserved-ranges = <0 4>;
+
+	/* Live DT qupv3_se9_i2c_active */
+	qup_i2c9_default: qup-i2c9-default-state {
+		pins = "gpio46", "gpio47";
+		function = "qup13";
+		drive-strength = <2>;
+		bias-disable;
+	};
 
 	/*
 	 * Live DT qupv3_se5_{ctsrx,rts,tx}, except RX: pulled up as on the
