@@ -31,7 +31,7 @@ You need:
    - **Docker Desktop:** Settings → Resources → File sharing.
 2. **Clone onto it**, then check prerequisites:
    ```sh
-   cd /Volumes/Pixel2Dev && git clone <this repository> pixel5-ubuntu && cd pixel5-ubuntu
+   cd /Volumes/Pixel2Dev && git clone https://github.com/jasiek/pixel5-ubuntu && cd pixel5-ubuntu
    scripts/check-prereqs.sh
    ```
    `check-prereqs.sh` lists anything missing, with the command that fixes it. No `--recurse-submodules` needed: the build fetches the submodules it uses as shallow clones.
