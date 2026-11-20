@@ -1,0 +1,206 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Fri, 20 Nov 2026 16:00:00 +0000
+Subject: [PATCH] LOCAL: soc: qcom: add an SMP2P AP sleep state driver
+
+The ADSP sensor framework (SEE) on the Pixel 5 offers a
+remote_proc_state sensor only when the AP publishes its awake state
+through the "sleepstate" SMP2P entry, and Google's CHRE in the same
+firmware waits for that sensor: without it the ADSP sensor process
+fatals 10 s after every boot. Port of the downstream driver
+(redbull kernel drivers/soc/qcom/smp2p_sleepstate.c, GPL-2.0-only):
+bit 12 set while awake, cleared on PM_SUSPEND_PREPARE, an inbound
+"sleepstate_see" edge is a wakeup event.
+
+Not for upstream as is: it needs a binding.
+
+Signed-off-by: pixel5 <pixel5@localhost>
+---
+ drivers/soc/qcom/Kconfig            |   9 ++
+ drivers/soc/qcom/Makefile           |   1 +
+ drivers/soc/qcom/smp2p_sleepstate.c | 141 ++++++++++++++++++++++++++++
+ 3 files changed, 151 insertions(+)
+ create mode 100644 drivers/soc/qcom/smp2p_sleepstate.c
+
+diff --git a/drivers/soc/qcom/Kconfig b/drivers/soc/qcom/Kconfig
+index 535c861..46083e4 100644
+--- a/drivers/soc/qcom/Kconfig
++++ b/drivers/soc/qcom/Kconfig
+@@ -201,6 +201,15 @@ config QCOM_SMP2P
+ 	  Say yes here to support the Qualcomm Shared Memory Point to Point
+ 	  protocol.
+ 
++
++config QCOM_SMP2P_SLEEPSTATE
++	tristate "Qualcomm SMP2P AP sleep state"
++	depends on QCOM_SMP2P
++	help
++	  Publish whether the application processor is awake to a remote
++	  processor through an SMP2P "sleepstate" entry, and let it ask to
++	  wake the AP. The ADSP sensor framework uses this for its
++	  remote_proc_state sensor.
+ config QCOM_SMSM
+ 	tristate "Qualcomm Shared Memory State Machine"
+ 	depends on MAILBOX
+diff --git a/drivers/soc/qcom/Makefile b/drivers/soc/qcom/Makefile
+index bddd6f0..f10887f 100644
+--- a/drivers/soc/qcom/Makefile
++++ b/drivers/soc/qcom/Makefile
+@@ -29,6 +29,7 @@ obj-$(CONFIG_QCOM_SMEM) +=	qcom_smem.o
+ obj-$(CONFIG_QCOM_SMEM_STATE) += smem_state.o
+ CFLAGS_smp2p.o := -I$(src)
+ obj-$(CONFIG_QCOM_SMP2P)	+= smp2p.o
++obj-$(CONFIG_QCOM_SMP2P_SLEEPSTATE)	+= smp2p_sleepstate.o
+ obj-$(CONFIG_QCOM_SMSM)	+= smsm.o
+ obj-$(CONFIG_QCOM_SOCINFO)	+= socinfo.o
+ obj-$(CONFIG_QCOM_SPM)		+= spm.o
+diff --git a/drivers/soc/qcom/smp2p_sleepstate.c b/drivers/soc/qcom/smp2p_sleepstate.c
+new file mode 100644
+index 0000000..1d5805a
+--- /dev/null
++++ b/drivers/soc/qcom/smp2p_sleepstate.c
+@@ -0,0 +1,141 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Tell a remote processor whether the application processor is awake,
++ * through an outbound SMP2P entry ("sleepstate"): bit 12 is set while
++ * Linux runs and cleared just before system suspend. The ADSP sensor
++ * framework (SEE) publishes this as its remote_proc_state sensor, which
++ * Google's CHRE on the Pixel 5 waits for. An inbound entry
++ * ("sleepstate_see") lets the remote side ask to keep the AP awake.
++ *
++ * Based on drivers/soc/qcom/smp2p_sleepstate.c in Google's redbull
++ * kernel (android-msm-redbull-4.19), GPL-2.0-only,
++ * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
++ */
++
++#include <linux/delay.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/pm_wakeup.h>
++#include <linux/soc/qcom/smem_state.h>
++#include <linux/suspend.h>
++
++#define AWAKE_BIT	BIT(12)
++
++struct sleepstate {
++	struct device *dev;
++	struct qcom_smem_state *state;
++	struct notifier_block pm_nb;
++	struct wakeup_source *ws;
++};
++
++static int sleepstate_pm_notifier(struct notifier_block *nb,
++				  unsigned long event, void *unused)
++{
++	struct sleepstate *ss = container_of(nb, struct sleepstate, pm_nb);
++
++	switch (event) {
++	case PM_SUSPEND_PREPARE:
++		qcom_smem_state_update_bits(ss->state, AWAKE_BIT, 0);
++		/* Downstream's value, tuned for SMP2P latency */
++		usleep_range(10000, 10500);
++		break;
++	case PM_POST_SUSPEND:
++		qcom_smem_state_update_bits(ss->state, AWAKE_BIT, AWAKE_BIT);
++		break;
++	}
++
++	return NOTIFY_DONE;
++}
++
++static irqreturn_t sleepstate_in_handler(int irq, void *data)
++{
++	struct sleepstate *ss = data;
++
++	__pm_wakeup_event(ss->ws, 200);
++
++	return IRQ_HANDLED;
++}
++
++static int sleepstate_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct sleepstate *ss;
++	unsigned int bit;
++	int irq, ret;
++
++	ss = devm_kzalloc(dev, sizeof(*ss), GFP_KERNEL);
++	if (!ss)
++		return -ENOMEM;
++	ss->dev = dev;
++
++	ss->state = devm_qcom_smem_state_get(dev, NULL, &bit);
++	if (IS_ERR(ss->state))
++		return dev_err_probe(dev, PTR_ERR(ss->state),
++				     "no sleepstate smem state\n");
++
++	ss->ws = wakeup_source_register(dev, "smp2p-sleepstate");
++	if (!ss->ws)
++		return -ENOMEM;
++
++	irq = platform_get_irq_byname_optional(pdev, "smp2p-sleepstate-in");
++	if (irq > 0) {
++		ret = devm_request_threaded_irq(dev, irq, NULL,
++						sleepstate_in_handler,
++						IRQF_ONESHOT,
++						"smp2p-sleepstate", ss);
++		if (ret) {
++			dev_err(dev, "failed to request irq %d: %d\n", irq, ret);
++			goto err_ws;
++		}
++	} else if (irq == -EPROBE_DEFER) {
++		ret = irq;
++		goto err_ws;
++	}
++
++	ss->pm_nb.notifier_call = sleepstate_pm_notifier;
++	ss->pm_nb.priority = INT_MAX;
++	ret = register_pm_notifier(&ss->pm_nb);
++	if (ret)
++		goto err_ws;
++
++	platform_set_drvdata(pdev, ss);
++	qcom_smem_state_update_bits(ss->state, AWAKE_BIT, AWAKE_BIT);
++	dev_info(dev, "AP awake state published (%s)\n",
++		 irq > 0 ? "with wake requests" : "no wake requests");
++
++	return 0;
++
++err_ws:
++	wakeup_source_unregister(ss->ws);
++	return ret;
++}
++
++static void sleepstate_remove(struct platform_device *pdev)
++{
++	struct sleepstate *ss = platform_get_drvdata(pdev);
++
++	unregister_pm_notifier(&ss->pm_nb);
++	qcom_smem_state_update_bits(ss->state, AWAKE_BIT, 0);
++	wakeup_source_unregister(ss->ws);
++}
++
++static const struct of_device_id sleepstate_of_match[] = {
++	{ .compatible = "qcom,smp2p-sleepstate" },
++	{}
++};
++MODULE_DEVICE_TABLE(of, sleepstate_of_match);
++
++static struct platform_driver sleepstate_driver = {
++	.probe = sleepstate_probe,
++	.remove = sleepstate_remove,
++	.driver = {
++		.name = "smp2p-sleepstate",
++		.of_match_table = sleepstate_of_match,
++	},
++};
++module_platform_driver(sleepstate_driver);
++
++MODULE_DESCRIPTION("Qualcomm SMP2P AP sleep state");
++MODULE_LICENSE("GPL");
+-- 
+2.50.1 (Apple Git-155)
+

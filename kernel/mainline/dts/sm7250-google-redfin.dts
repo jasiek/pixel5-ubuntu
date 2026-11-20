@@ -557,6 +557,22 @@
 			interrupt-controller;
 			#interrupt-cells = <2>;
 		};
+
+		/*
+		 * The AP's awake/asleep state for the ADSP sensors (SEE's
+		 * remote_proc_state sensor): bit 12 set while awake (downstream
+		 * smp2p_sleepstate.c). sleepstate_see: SEE asks to wake the AP.
+		 */
+		adsp_sleepstate_out: sleepstate-out {
+			qcom,entry-name = "sleepstate";
+			#qcom,smem-state-cells = <1>;
+		};
+
+		adsp_sleepstate_in: sleepstate-in {
+			qcom,entry-name = "sleepstate_see";
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
 	};
 
 	/* Live DT qcom,smp2p-cdsp: SMEM items 94/432, IPCC client CDSP */
