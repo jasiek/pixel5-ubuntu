@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Ask the ADSP's sensor framework (SEE) which sensors exist, by data type.
+#   pixel5-see-suids [data_type ...]     (default: a list of common ones)
+# Talks QMI over QRTR (Python's AF_QIPCRTR) to the SEE client service
+# (service 400) and sends sns_suid_req lookups to the SUID sensor; prints
+# the SUIDs each data type has, or "none" after a timeout. Protobuf and
+# QMI are encoded by hand (only the few fields used here).
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+SNS_CLIENT_SVC = 400
+SUID_SENSOR = (0xABABABABABABABAB, 0xABABABABABABABAB)  # the lookup sensor
+SNS_SUID_MSGID_REQ = 512
+SNS_SUID_MSGID_EVENT = 768
+QMI_REQ, QMI_RESP, QMI_IND = 0, 2, 4
+SNS_CLIENT_REQ = 0x20
+SNS_CLIENT_REPORT_IND = 0x22
+SNS_CLIENT_JUMBO_REPORT_IND = 0x21
+
+DEFAULT_TYPES = [
+    "suid", "registry", "timer", "interrupt", "async_com_port",
+    "remote_proc_state", "resampler", "accel_cal", "gyro_cal", "mag_cal",
+    "accel", "gyro", "mag", "pressure", "ambient_light", "proximity",
+    "sensor_temperature", "device_orient", "sar", "touch_gesture",
+    "sig_motion", "pedometer", "rotv", "gravity", "amd",
+]
+
+
+# --- protobuf (just enough) ---
+def varint(n):
+    out = b""
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        if n:
+            out += bytes([b | 0x80])
+        else:
+            return out + bytes([b])
+
+
+def f_varint(num, v):
+    return varint(num << 3 | 0) + varint(v)
+
+
+def f_bytes(num, b):
+    return varint(num << 3 | 2) + varint(len(b)) + b
+
+
+def f_fixed32(num, v):
+    return varint(num << 3 | 5) + struct.pack("<I", v)
+
+
+def f_fixed64(num, v):
+    return varint(num << 3 | 1) + struct.pack("<Q", v)
+
+
+def parse(buf):
+    """-> list of (field, wiretype, value)"""
+    i, out = 0, []
+    while i < len(buf):
+        key, n = 0, 0
+        while True:
+            b = buf[i]; i += 1
+            key |= (b & 0x7F) << n; n += 7
+            if not b & 0x80:
+                break
+        num, wt = key >> 3, key & 7
+        if wt == 0:
+            v, n = 0, 0
+            while True:
+                b = buf[i]; i += 1
+                v |= (b & 0x7F) << n; n += 7
+                if not b & 0x80:
+                    break
+        elif wt == 1:
+            v = struct.unpack_from("<Q", buf, i)[0]; i += 8
+        elif wt == 5:
+            v = struct.unpack_from("<I", buf, i)[0]; i += 4
+        elif wt == 2:
+            ln, n = 0, 0
+            while True:
+                b = buf[i]; i += 1
+                ln |= (b & 0x7F) << n; n += 7
+                if not b & 0x80:
+                    break
+            v = buf[i:i + ln]; i += ln
+        else:
+            raise ValueError("wire type %d" % wt)
+        out.append((num, wt, v))
+    return out
+
+
+def suid_msg(lo, hi):
+    return f_fixed64(1, lo) + f_fixed64(2, hi)
+
+
+def suid_request(data_type):
+    req = f_bytes(1, data_type.encode()) + f_varint(2, 1)  # register_updates
+    std_request = f_bytes(2, req)                            # payload
+    susp = f_varint(1, 1) + f_varint(2, 0)                   # APSS, wakeup
+    return (f_bytes(1, suid_msg(*SUID_SENSOR)) + f_fixed32(2, SNS_SUID_MSGID_REQ)
+            + f_bytes(3, susp) + f_bytes(4, std_request))
+
+
+# --- QMI ---
+def qmi(msg_type, txn, msg_id, tlvs):
+    body = b"".join(struct.pack("<BH", t, len(v)) + v for t, v in tlvs)
+    return struct.pack("<BHHH", msg_type, txn, msg_id, len(body)) + body
+
+
+def qmi_parse(pkt):
+    msg_type, txn, msg_id, ln = struct.unpack_from("<BHHH", pkt)
+    i, tlvs = 7, {}
+    while i < 7 + ln:
+        t, l = struct.unpack_from("<BH", pkt, i)
+        tlvs[t] = pkt[i + 3:i + 3 + l]
+        i += 3 + l
+    return msg_type, txn, msg_id, tlvs
+
+
+def find_service():
+    out = subprocess.run(["qrtr-lookup"], capture_output=True, text=True).stdout
+    for line in out.splitlines()[1:]:
+        f = line.split()
+        if len(f) >= 5 and f[0] == str(SNS_CLIENT_SVC):
+            return int(f[3]), int(f[4])
+    return None
+
+
+def main():
+    types = sys.argv[1:] or DEFAULT_TYPES
+    addr = None
+    for _ in range(100):
+        addr = find_service()
+        if addr:
+            break
+        time.sleep(0.1)
+    if not addr:
+        print("SEE client service %d not found" % SNS_CLIENT_SVC)
+        return 1
+    s = socket.socket(socket.AF_QIPCRTR, socket.SOCK_DGRAM)
+    s.settimeout(0.3)
+    print("SEE client service at node %d port %d" % addr)
+    found = {}
+    for txn, dt in enumerate(types, 1):
+        payload = suid_request(dt)
+        s.sendto(qmi(QMI_REQ, txn, SNS_CLIENT_REQ,
+                     [(0x01, struct.pack("<H", len(payload)) + payload),
+                      (0x10, b"\x01")]), addr)  # use_jumbo_report
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        try:
+            pkt, _ = s.recvfrom(65536)
+        except socket.timeout:
+            continue
+        mt, txn, mid, tlvs = qmi_parse(pkt)
+        if mt == QMI_RESP:
+            res = tlvs.get(0x02, b"\0\0\0\0")
+            r, e = struct.unpack_from("<HH", res)
+            if r:
+                print("request %d (%s): QMI error %d" % (txn, types[txn - 1], e))
+            continue
+        if mt != QMI_IND or mid not in (SNS_CLIENT_REPORT_IND, SNS_CLIENT_JUMBO_REPORT_IND):
+            continue
+        p = tlvs.get(0x02, b"")
+        if len(p) < 2:
+            continue
+        ln = struct.unpack_from("<H", p)[0]
+        for num, _, v in parse(p[2:2 + ln]):
+            if num != 2:          # events
+                continue
+            ev = {n: val for n, _, val in parse(v)}
+            if ev.get(1) != SNS_SUID_MSGID_EVENT:
+                continue
+            dt, suids = None, []
+            for n, _, val in parse(ev.get(3, b"")):
+                if n == 1:
+                    dt = val.decode(errors="replace")
+                elif n == 2:
+                    f = {a: b for a, _, b in parse(val)}
+                    suids.append("%016x%016x" % (f.get(2, 0), f.get(1, 0)))
+            found[dt] = suids
+    for dt in types:
+        suids = found.get(dt)
+        print("%-20s %s" % (dt, "no answer" if suids is None
+                            else (", ".join(s[:8] + ".." for s in suids) or "none")))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
