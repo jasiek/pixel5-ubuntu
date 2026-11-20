@@ -63,7 +63,9 @@ t4|default)
     # 600) unless cancelled with `sudo pkill reboot-bootloader`.
     KMODS=0 /work/scripts/build-initramfs.sh initramfs/init "${T#/work/}/initramfs.cpio.lz4" >/dev/null
     RD=$T/initramfs.cpio.lz4
-    CMD="pixel5.fallback=${FALLBACK:-600} panic=${PANIC:--1} ${UNUSED-clk_ignore_unused pd_ignore_unused}${EXTRA:+ $EXTRA}"
+    # consoleblank=60: the text console on the OLED switches the panel off
+    # (rails down) after 60 s without input (owner's choice, Test 139).
+    CMD="pixel5.fallback=${FALLBACK:-600} panic=${PANIC:--1} ${UNUSED-clk_ignore_unused pd_ignore_unused} consoleblank=60${EXTRA:+ $EXTRA}"
     [ "$TEST" = default ] && CMD=${CMD#pixel5.fallback=* }
     ;;
 *) echo "unknown test $TEST" >&2; exit 2 ;;
