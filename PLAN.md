@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P7.2 gate: a full `scripts/flash.sh` run (owner OK: it wipes userdata). Then back to P6.4 (display, touch, audio).
+## ▶ RESUME HERE: P6.4: display (S6E3HC2 panel driver), then touch and audio. Open owner items: P7.2 gate (someone else installs from the README), nairo licence.
 
 ---
 
@@ -132,7 +132,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
 ## Phase 7: One-command build + guided flashing (half a day; copy Pixel 2 P9)
 - [x] **P7.1** _Done 2026-11-20: fresh clone → images with only the factory zip added (≈1 h 40 min cold); two gaps found and fixed (battery data from the kernel source, vendor module order from vendor_boot.img). Mainline kernel modules now in the rootfs._ `scripts/build-all.sh` (hash-gated steps, as in the Pixel 2): submodules, container, kernel(s), initramfs, boot images, rootfs, firmware staging scripts.
   - Gate: fresh clone → images, no manual steps.
-- [ ] **P7.2** _Written 2026-11-20; phone checks tested read-only. Flashing path untested (wipes userdata)._ `scripts/flash.sh`: checks the phone is redfin + unlocked + on the final build, asks for `yes`, flashes vbmeta/boot/(vendor_boot)/userdata on explicit `_a`/`_b`, waits for SSH. Plus `restore`.
+- [ ] **P7.2** _Script path done 2026-11-20 (Test 136): full install on this phone, Ubuntu up on wifi, all services and sensors working. Gate left: someone else flashes a phone from the README._ `scripts/flash.sh`: checks the phone is redfin + unlocked + on the final build, asks for `yes`, flashes vbmeta/boot/(vendor_boot)/userdata on explicit `_a`/`_b`, waits for SSH. Plus `restore`.
   - Gate: someone else flashes a phone using only README + `flash.sh`.
 - [x] **P7.3** README: install flow. _Done 2026-11-20; repo public at github.com/jasiek/pixel5-ubuntu._
 
