@@ -47,6 +47,12 @@ nairo 0053-dt-bindings-soc-qcom-aoss-qmp-Add-SM7250.patch
 nairo 0054-dt-bindings-remoteproc-qcom-sm6350-pas-Add-SM7250-MP.patch
 nairo 0055-remoteproc-qcom_q6v5_pas-Add-SM7250-MPSS.patch
 nairo 0069-net-qrtr-ns-Do-not-let-one-failed-announcement-hide-.patch
+# P6.4 GPU A620: gpucc SM7250 PLL, UBWC SM7250, no SMMU PRR, A620 in a6xx;
+# the GPU, GMU, gpucc and Adreno SMMU nodes are in our board DTS
+nairo 0033-clk-qcom-gpucc-sm8250-Add-SM7250-support.patch
+nairo 0034-soc-qcom-ubwc-Add-SM7250.patch
+nairo 0035-iommu-arm-smmu-qcom-Don-t-enable-PRR-on-the-SM7250-A.patch
+nairo 0036-drm-msm-a6xx-Add-A620-support.patch
 # optional (suspend only): nairo 0112-usb-dwc3-qcom-Reapply-UTMI-pipe-clk-on-resume.patch
 # Bring-up aid (ours, GPL-2.0-only like the kernel): pixel5.reset_at=N
 local 0001-LOCAL-arm64-pixel5.reset_at-N-boot-stage-probe.patch
