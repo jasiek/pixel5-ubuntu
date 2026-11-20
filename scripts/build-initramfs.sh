@@ -36,6 +36,17 @@ if [ "${KMODS:-0}" = 1 ]; then
     KD=$(echo /work/build/kernel/modules-install/lib/modules/*)
     [ -d "$KD" ] || { echo "no modules: run scripts/build-kernel.sh" >&2; exit 1; }
     LOADLIST=/work/${MODLOAD:-build/stock/vbx/lib/modules/modules.load}
+    if [ ! -f "$LOADLIST" ] && [ -z "${MODLOAD:-}" ]; then
+        # The default list is the stock vendor ramdisk's: unpack it from the
+        # factory vendor_boot.img (scripts/get-firmware.sh) on first use.
+        V=/tmp/vendor_boot; rm -rf "$V"; mkdir -p "$V/x"
+        python3 /work/external/mkbootimg/unpack_bootimg.py \
+            --boot_img /work/firmware/vendor_boot.img --out "$V" >/dev/null
+        for rd in "$V"/vendor_ramdisk*; do
+            (cd "$V/x" && lz4 -dc "$rd" | cpio -id --quiet 'lib/modules/*' 2>/dev/null) || true
+        done
+        [ -f "$V/x/lib/modules/modules.load" ] && install -D -m 644 "$V/x/lib/modules/modules.load" "$LOADLIST"
+    fi
     [ -f "$LOADLIST" ] || { echo "no $LOADLIST" >&2; exit 1; }
     M="$T/lib/modules"; mkdir -p "$M"
     # name (with "_") -> path in our build
