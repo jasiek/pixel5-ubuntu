@@ -1,0 +1,51 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Pixel 5 Ubuntu benchmark: CPU, memory, crypto, storage, sustained thermals.
+set -u
+T() { cat /sys/class/thermal/thermal_zone8/temp; }   # cpuss1 (big cores)
+hdr() { echo; echo "=== $* ($(date +%T), cpuss1 $(( $(T)/1000 ))C)"; }
+
+hdr "sysbench cpu, 1 thread, per core type"
+for c in 0 6 7; do
+  printf "cpu%s: " $c
+  taskset -c $c sysbench cpu --cpu-max-prime=20000 --time=15 run | awk '/events per second/{print $4" ev/s"}'
+done
+hdr "sysbench cpu, 8 threads"
+sysbench cpu --cpu-max-prime=20000 --threads=8 --time=20 run | awk '/events per second/{print $4" ev/s"}'
+
+hdr "7-zip benchmark (all cores)"
+7z b -mmt8 | tail -4
+hdr "7-zip benchmark (cpu7 only)"
+taskset -c 7 7z b -mmt1 | tail -2
+
+hdr "openssl speed (cpu7)"
+taskset -c 7 openssl speed -seconds 3 -evp aes-256-gcm 2>/dev/null | tail -2
+taskset -c 7 openssl speed -seconds 3 -evp sha256 2>/dev/null | tail -1
+taskset -c 7 openssl speed -seconds 3 ed25519 2>/dev/null | tail -2
+
+hdr "memory bandwidth (sysbench, 1M blocks)"
+for op in read write; do
+  printf "%s 1 thread: " $op
+  sysbench memory --memory-block-size=1M --memory-total-size=40G --memory-oper=$op --threads=1 --time=10 run | awk '/transferred/{print $(NF-1)" "$NF}'
+  printf "%s 4 threads: " $op
+  sysbench memory --memory-block-size=1M --memory-total-size=80G --memory-oper=$op --threads=4 --time=10 run | awk '/transferred/{print $(NF-1)" "$NF}'
+done
+
+hdr "storage (fio on /, UFS, direct I/O)"
+F=/var/tmp/fio.bin
+fio --name=sw --filename=$F --size=2G --rw=write --bs=1M --direct=1 --ioengine=libaio --iodepth=8 --output-format=terse --terse-version=3 | awk -F';' '{printf "seq write 1M: %.0f MB/s\n", $48/1024}'
+fio --name=sr --filename=$F --size=2G --rw=read --bs=1M --direct=1 --ioengine=libaio --iodepth=8 --output-format=terse --terse-version=3 | awk -F';' '{printf "seq read 1M: %.0f MB/s\n", $7/1024}'
+fio --name=rr --filename=$F --size=2G --rw=randread --bs=4k --direct=1 --ioengine=libaio --iodepth=32 --runtime=15 --time_based --output-format=terse --terse-version=3 | awk -F';' '{printf "rand read 4k QD32: %d IOPS\n", $8}'
+fio --name=rw --filename=$F --size=2G --rw=randwrite --bs=4k --direct=1 --ioengine=libaio --iodepth=32 --runtime=15 --time_based --output-format=terse --terse-version=3 | awk -F';' '{printf "rand write 4k QD32: %d IOPS\n", $49}'
+fio --name=rr1 --filename=$F --size=2G --rw=randread --bs=4k --direct=1 --ioengine=libaio --iodepth=1 --runtime=10 --time_based --output-format=terse --terse-version=3 | awk -F';' '{printf "rand read 4k QD1: %d IOPS\n", $8}'
+rm -f $F
+
+hdr "sustained load: stress-ng 8 cpus, 300 s (t, cpu7 MHz, cpu0 MHz, cpuss1 C, bogo-ops so far)"
+stress-ng --cpu 8 --cpu-method matrixprod --timeout 300s --metrics-brief > /tmp/stress.out 2>&1 &
+for i in $(seq 0 15 300); do
+  echo "t=${i}s cpu7=$(( $(cat /sys/devices/system/cpu/cpu7/cpufreq/scaling_cur_freq)/1000 )) cpu0=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq)/1000 )) temp=$(( $(T)/1000 ))C"
+  sleep 15
+done
+wait
+grep -E "cpu " /tmp/stress.out | tail -1
+hdr "done"
