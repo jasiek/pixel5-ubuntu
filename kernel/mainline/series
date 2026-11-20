@@ -46,6 +46,8 @@ nairo 0052-dt-bindings-mailbox-qcom-ipcc-Add-SM7250.patch
 nairo 0053-dt-bindings-soc-qcom-aoss-qmp-Add-SM7250.patch
 nairo 0054-dt-bindings-remoteproc-qcom-sm6350-pas-Add-SM7250-MP.patch
 nairo 0055-remoteproc-qcom_q6v5_pas-Add-SM7250-MPSS.patch
+# P6.4: print the TZ error when a PAS image is refused (CDSP, Test 115)
+nairo 0122-remoteproc-qcom-pas-Print-auth-error-code.patch
 nairo 0069-net-qrtr-ns-Do-not-let-one-failed-announcement-hide-.patch
 # P6.4 GPU A620: gpucc SM7250 PLL, UBWC SM7250, no SMMU PRR, A620 in a6xx;
 # the GPU, GMU, gpucc and Adreno SMMU nodes are in our board DTS
