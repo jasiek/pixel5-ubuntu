@@ -1,15 +1,21 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# Test helper (Test 121): build the hexagonrpcd root in /run, start the
-# ADSP, then the sensors and root PD servers. Nothing leaves the phone.
+# Test helper (Tests 121, 126): build the hexagonrpcd root in /run, start
+# the ADSP, then the sensors and root PD servers. Nothing leaves the phone.
+# The writable registry (hexagonrpcd-rw) is a tmpfs copy of persist's;
+# the real persist partition is only ever mounted read-only.
 set -eu
 R=/run/hexagonrpc
-BIN=${BIN:-/usr/local/bin/hexagonrpcd-fac}
+BIN=${BIN:-/usr/local/bin/hexagonrpcd-rw}
 mkdir -p $R/sensors $R/dsp $R/socinfo /run/persist-ro
 mountpoint -q /run/persist-ro || mount -o ro,noload /dev/disk/by-partlabel/persist /run/persist-ro
 ln -sfn /vendor/etc/sensors/config $R/sensors/config
 ln -sfn /run/persist-ro/sensors/registry/registry $R/sensors/registry
 ln -sfn /run/persist-ro/sensors/registry/factory_data $R/sensors/factory_data
+if [ ! -d $R/sensors/persist-registry ]; then
+    mkdir -p $R/sensors/persist-registry
+    cp -a /run/persist-ro/sensors/registry/registry /run/persist-ro/sensors/registry/factory_data $R/sensors/persist-registry/
+fi
 ln -sfn /vendor/etc/sensors/sns_reg_config $R/sensors/sns_reg.conf
 ln -sfn /vendor/dsp/adsp $R/dsp/adsp
 ln -sfn /vendor/etc/acdbdata $R/acdb
