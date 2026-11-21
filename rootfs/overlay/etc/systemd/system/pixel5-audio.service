@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+# Speaker routes and a safe volume on the mainline sound card.
+[Unit]
+Description=Pixel 5 mixer defaults (mainline)
+ConditionKernelVersion=>=6
+After=sound.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pixel5-audio-setup
+
+[Install]
+WantedBy=multi-user.target

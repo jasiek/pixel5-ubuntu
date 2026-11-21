@@ -1,0 +1,24 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Mixer defaults for the Pixel 5 sound card on mainline (P6.4):
+#  - MultiMedia1 (hw:G5,0) -> quinary TDM -> both CS35L41 speaker amps
+#  - amp current sense (IMON) -> MultiMedia2 (hw:G5,1), for tests
+# The amps run with their protection DSP bypassed (PCM Source ASP), so the
+# digital volume starts at -20 dB (657; 817 = 0 dB). No mixer UI yet.
+set -u
+i=0
+until grep -q "Google Pixel 5" /proc/asound/cards 2>/dev/null; do
+	i=$((i + 1))
+	[ "$i" -ge 60 ] && { echo "no Pixel 5 sound card"; exit 0; }
+	sleep 1
+done
+set_() { amixer -q -c G5 cset name="$1" "$2" || echo "failed: $1 = $2"; }
+for s in L R; do
+	set_ "$s PCM Source" ASP
+	set_ "$s Digital PCM Volume" 657
+	set_ "$s ASP TX1 Source" IMON
+	set_ "$s ASP TX2 Source" Zero
+done
+set_ "QUIN_TDM_RX_0 Audio Mixer MultiMedia1" 1
+set_ "MultiMedia2 Mixer QUIN_TDM_TX_0" 1
+echo "speakers routed, volume -20 dB"
