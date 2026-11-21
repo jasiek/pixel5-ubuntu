@@ -11,9 +11,10 @@ The Pixel 5 (redfin) boots straight into plain, headless Ubuntu 24.04 arm64 on a
 - display: a text console on the screen, switched off after 60 s idle (any key, e.g. Power, wakes it)
 - touchscreen (multitouch, `/dev/input/event*` "s6sy761")
 - stereo speakers (`aplay -D hw:G5,0 file.wav`; starts at -20 dB, keep it low: the speaker protection firmware is not loaded)
+- microphone (`arecord -D hw:G5,1 -f S16_LE -r 48000 -c 2 -d 5 rec.wav`; through the RT5514 DSP, firmware from the vendor partition; mono)
 - sensors via the ADSP: accelerometer, gyroscope, magnetometer, barometer, light (`sudo pixel5-see read accel`)
 
-**Not yet:** microphones, headphones over USB-C, cameras, deep sleep (suspend works but saves little). Details: [`PLAN.md`](PLAN.md).
+**Not yet:** headphones over USB-C, cameras, deep sleep (suspend works but saves little). Details: [`PLAN.md`](PLAN.md).
 
 ## Install
 

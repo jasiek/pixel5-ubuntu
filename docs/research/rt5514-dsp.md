@@ -42,25 +42,25 @@ Status: not started. Plain capture (mainline path) gives exact zeros
    using the same SPI link.
 4. One step per test image; first check whether fw load over SPI works at all.
 
-## Results so far (Tests 166-167)
+## Result (Tests 166-173): it works
 
-- DT for SE4 and its GPI DMA works at the bus level (`gpi_dma0` is the
-  SM6350 block; SE4's FIFO is off, so DMA is required).
-- The RT5514 never answers over SPI: reads give zeros, even for the ID
-  register, in every SPI mode and with GPIO5 low, high or untouched.
-- WIP driver code: `kernel/mainline/patches/wip/0009-...` (not in the
-  series; module parameters `rt5514 spi_switch=`, `rt5514-spi mode= hz=`).
+- SE4 SPI needs GPI DMA (`gpi_dma0`, the SM6350 block; SE4's FIFO is off).
+- On that path, **receive-only SPI transfers return zeros**; duplex and
+  transmit-only work (Test 171). rt5514-spi reads full-duplex: one
+  transfer of command, address, 4 dummy bytes and the data (patch 0009).
+  Root cause in spi-geni-qcom not investigated: a candidate upstream bug.
+- The handshake (Test 168) and the rails (Test 169) were never the cause;
+  downstream reads the chip with the same hardware (Test 170).
+- In DSP mode the firmware owns the interface: it sets PLL2 from BCLK
+  and the DMIC clock in CLK_CTRL1. The codec must not apply the machine
+  driver's fmt/sysclk/pll/tdm calls, and must not write registers from
+  its cache (DAPM update_bits restored the default DMIC divider and the
+  mics gave LSB noise). Patch 0010 (Test 172).
+- At boot the first load fails about every second time and leaves the
+  chip reading zeros on I2C; a reset (TLMM 91) recovers it. The driver
+  resets and retries (Test 173). Cause unknown; it may be the ADSP sensor
+  stack starting at the same time.
 
-## Next leads
-
-1. ~~The handshake~~ (Test 168): TLMM 11 is held low and never moves
-   when TLMM 66 toggles; by downstream's level-low rule that is an
-   immediate ack, so it does not block the bus.
-2. Power of the SPI switch IC: it may sit on a rail that only Android
-   enables (no rail is named in the downstream DT; needs a schematic or
-   a rail-by-rail test).
-3. Whether the ADSP sensor stack (`pixel5-see`) opens the RT5514 SPI link
-   itself (downstream CHRE "SPI_SWITCH_MASK_CHRE_QMI").
-4. Scope or logic probe on the SE4 lines, if the owner has one: shows
-   whether CS and SCLK toggle and whether MISO ever moves.
-
+Open: the capture is mono duplicated to two channels (DSP buffer
+0x18002fcc = 1); the second microphone, gain controls and wake-word
+features are not explored.
