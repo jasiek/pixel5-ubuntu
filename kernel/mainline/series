@@ -84,3 +84,4 @@ local 0007-LOCAL-ASoC-qcom-q6afe-pass-TDM-data-out-invert-sync-and-data-delay.pa
 local 0008-LOCAL-ASoC-qcom-q6routing-accept-S32_LE-back-ends.patch
 local 0009-LOCAL-ASoC-rt5514-spi-full-duplex-burst-reads-report-errors.patch
 local 0010-LOCAL-ASoC-rt5514-capture-through-the-RT5514P-DSP.patch
+local 0011-LOCAL-remoteproc-qcom_q6v5_pas-optional-proxy-interconnect-vote.patch

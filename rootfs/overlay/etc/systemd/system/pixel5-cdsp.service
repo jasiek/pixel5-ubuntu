@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+# Mainline kernel: start the CDSP (compute DSP). Nothing uses it yet, but
+# a running, idle CDSP sleeps on its own; a never-started one is left as
+# the bootloader put it. Needs the compute NoC vote (local patch 0011,
+# Test 184): kernels whose CDSP node has no interconnects skip this.
+[Unit]
+Description=Start the CDSP (mainline remoteproc)
+ConditionKernelVersion=>=6
+ConditionPathExists=/sys/firmware/devicetree/base/soc@0/remoteproc@8300000/interconnects
+Wants=pixel5-firmware.service
+After=pixel5-firmware.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/pixel5-rproc cdsp start
+ExecStop=/usr/local/sbin/pixel5-rproc cdsp stop
+
+[Install]
+WantedBy=multi-user.target

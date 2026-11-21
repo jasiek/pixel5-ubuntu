@@ -17,6 +17,7 @@
 #include <dt-bindings/firmware/qcom,scm.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/interconnect/qcom,sm8250.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/mailbox/qcom-ipcc.h>
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
@@ -861,10 +862,24 @@
 		};
 	};
 
+	/*
+	 * Compute NoC: SM7250 has SM8250's (downstream lito-bus: same
+	 * nodes qnm_npu -> qns_cdsp_gemnoc, same BCMs CO0/CO2). Base from
+	 * lito-bus (compute_noc 0x1700000 + 0x9000); no QoS is programmed.
+	 */
+	compute_noc: interconnect@1709000 {
+		compatible = "qcom,sm8250-compute-noc";
+		reg = <0x0 0x01709000 0x0 0x1000>;
+		#interconnect-cells = <2>;
+		qcom,bcm-voters = <&apps_bcm_voter>;
+	};
+
 	remoteproc_cdsp: remoteproc@8300000 {
 		compatible = "qcom,sm8250-cdsp-pas";
-		status = "disabled";
 		reg = <0x0 0x08300000 0x0 0x10000>;
+
+		/* downstream turing: NPU -> CDSP GEM NoC, ib 1 KB/s, while booting */
+		interconnects = <&compute_noc MASTER_NPU 0 &compute_noc SLAVE_CDSP_MEM_NOC 0>;
 
 		interrupts-extended = <&intc GIC_SPI 578 IRQ_TYPE_EDGE_RISING>,
 				      <&cdsp_smp2p_in 0 IRQ_TYPE_EDGE_RISING>,

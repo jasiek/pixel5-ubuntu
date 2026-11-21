@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Sat, 21 Nov 2026 13:00:00 +0000
+Subject: [PATCH] LOCAL: remoteproc: qcom_q6v5_pas: optional proxy
+ interconnect vote
+
+On the Google Pixel 5 (SM7250) the CDSP fails to start with "failed to
+authenticate image and release reset: -22" every time, while the same
+firmware starts at once under Google's downstream kernel. Downstream's
+CDSP node votes the compute NoC path NPU -> CDSP GEM NoC (ib 1 KB/s)
+from start until the proxy-unvote (handover) interrupt; with that vote
+the CDSP starts in 0.1 s on mainline too.
+
+Take an optional "interconnects" path from the DT and hold a minimal
+peak vote (1 kB/s) while the remote processor boots, dropped together
+with the other proxy votes at handover or on failure. Without the
+property devm_of_icc_get() returns NULL and nothing changes.
+---
+diff --git a/drivers/remoteproc/qcom_q6v5_pas.c b/drivers/remoteproc/qcom_q6v5_pas.c
+index 73c517b63..3776196e1 100644
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -11,6 +11,7 @@
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+ #include <linux/firmware.h>
++#include <linux/interconnect.h>
+ #include <linux/interrupt.h>
+ #include <linux/iommu.h>
+ #include <linux/kernel.h>
+@@ -94,6 +95,7 @@ struct qcom_pas {
+ 
+ 	struct clk *xo;
+ 	struct clk *aggre2_clk;
++	struct icc_path *path;	/* optional proxy bus vote while booting */
+ 
+ 	struct regulator *cx_supply;
+ 	struct regulator *px_supply;
+@@ -318,10 +320,14 @@ static int qcom_pas_start(struct rproc *rproc)
+ 	if (ret < 0)
+ 		goto disable_irqs;
+ 
+-	ret = clk_prepare_enable(pas->xo);
++	ret = icc_set_bw(pas->path, 0, 1);
+ 	if (ret)
+ 		goto disable_proxy_pds;
+ 
++	ret = clk_prepare_enable(pas->xo);
++	if (ret)
++		goto disable_icc;
++
+ 	ret = clk_prepare_enable(pas->aggre2_clk);
+ 	if (ret)
+ 		goto disable_xo_clk;
+@@ -405,6 +411,8 @@ static int qcom_pas_start(struct rproc *rproc)
+ 	clk_disable_unprepare(pas->aggre2_clk);
+ disable_xo_clk:
+ 	clk_disable_unprepare(pas->xo);
++disable_icc:
++	icc_set_bw(pas->path, 0, 0);
+ disable_proxy_pds:
+ 	qcom_pas_pds_disable(pas, pas->proxy_pds, pas->proxy_pd_count);
+ disable_irqs:
+@@ -426,6 +434,7 @@ static void qcom_pas_handover(struct qcom_q6v5 *q6v5)
+ 		regulator_disable(pas->cx_supply);
+ 	clk_disable_unprepare(pas->aggre2_clk);
+ 	clk_disable_unprepare(pas->xo);
++	icc_set_bw(pas->path, 0, 0);
+ 	qcom_pas_pds_disable(pas, pas->proxy_pds, pas->proxy_pd_count);
+ }
+ 
+@@ -990,6 +999,13 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto unassign_mem;
+ 
++	pas->path = devm_of_icc_get(&pdev->dev, NULL);
++	if (IS_ERR(pas->path)) {
++		ret = dev_err_probe(&pdev->dev, PTR_ERR(pas->path),
++				    "failed to get interconnect path\n");
++		goto unassign_mem;
++	}
++
+ 	ret = qcom_pas_pds_attach(&pdev->dev, pas->proxy_pds, desc->proxy_pd_names);
+ 	if (ret < 0)
+ 		goto unassign_mem;
