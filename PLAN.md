@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P6.4 suspend: all DSPs sleep (patches 0011-0012), AOSS sleep still 0 with the cable out (Tests 194-196). Next: the clock whose switch-off hangs boot (Test 195). Release `ga7e4b32f250b` (0011+0012) tested, not flashed. Open owner items: P7.2 gate, nairo licence.
+## ▶ RESUME HERE: P6.4 suspend: all DSPs sleep (patches 0011-0012), AOSS sleep still 0 with the cable out (Tests 194-196). Next: the clock whose switch-off hangs boot (Test 195). Release `ga7e4b32f250b` (0011+0012) on boot_b (Test 197). Open owner items: P7.2 gate, nairo licence.
 
 ---
 
