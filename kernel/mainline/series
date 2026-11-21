@@ -86,3 +86,4 @@ local 0009-LOCAL-ASoC-rt5514-spi-full-duplex-burst-reads-report-errors.patch
 local 0010-LOCAL-ASoC-rt5514-capture-through-the-RT5514P-DSP.patch
 local 0011-LOCAL-remoteproc-qcom_q6v5_pas-optional-proxy-interconnect-vote.patch
 local 0012-LOCAL-ASoC-qcom-q6afe-keep-the-LPASS-core-HW-vote-handle.patch
+local 0013-LOCAL-drm-msm-dsi-phy-prepare-the-AHB-clock-only-while-resumed.patch
