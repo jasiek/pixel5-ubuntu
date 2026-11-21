@@ -41,3 +41,23 @@ Status: not started. Plain capture (mainline path) gives exact zeros
 3. Find out whether the handshake GPIOs matter without the sensor hub
    using the same SPI link.
 4. One step per test image; first check whether fw load over SPI works at all.
+
+## Results so far (Tests 166-167)
+
+- DT for SE4 and its GPI DMA works at the bus level (`gpi_dma0` is the
+  SM6350 block; SE4's FIFO is off, so DMA is required).
+- The RT5514 never answers over SPI: reads give zeros, even for the ID
+  register, in every SPI mode and with GPIO5 low, high or untouched.
+- WIP driver code: `kernel/mainline/patches/wip/0009-...` (not in the
+  series; module parameters `rt5514 spi_switch=`, `rt5514-spi mode= hz=`).
+
+## Next leads
+
+1. The handshake: drive TLMM 66 low, then high, and watch TLMM 11 (the
+   CHRE's ack, falling edge). If the ADSP never answers, the sensor
+   firmware may own the switch or the RT5514 SPI port.
+2. Whether the ADSP sensor stack (`pixel5-see`) opens the RT5514 SPI link
+   itself (downstream CHRE "SPI_SWITCH_MASK_CHRE_QMI").
+3. Scope or logic probe on the SE4 lines, if the owner has one: shows
+   whether CS and SCLK toggle and whether MISO ever moves.
+
