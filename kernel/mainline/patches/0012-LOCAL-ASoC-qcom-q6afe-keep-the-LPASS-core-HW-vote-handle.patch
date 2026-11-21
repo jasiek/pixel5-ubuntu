@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Sat, 21 Nov 2026 14:30:00 +0000
+Subject: [PATCH] LOCAL: ASoC: qcom: q6afe: keep the LPASS core HW vote handle
+
+The ADSP answers AFE_CMD_REMOTE_LPASS_CORE_HW_VOTE_REQUEST with
+AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST, whose payload is the
+client handle the matching devote has to quote. q6afe dropped it: the
+callback took the second payload word as a status (past the end of the
+4-byte reply) and q6afe_vote_lpass_core_hw() never filled in
+*client_handle, so q6dsp-lpass-clocks sent every devote with handle 0.
+The ADSP refuses those ("cmd = 0x100f6 returned error = 0x1"), the
+votes of the LPASS LPI pinctrl's HW_MACRO/DCODEC clocks stay held, and
+on the Google Pixel 5 (SM7250) the ADSP never power collapses after the
+first pin access (qcom_stats adsp count 0 for hours; 32 sleeps in the
+first minute with this patch).
+
+Store the handle from the reply and return it to the caller. Votes come
+from clk prepare/unprepare, which the clk framework serialises, so one
+field is enough. Also stop logging the devote's success reply as an
+unknown command.
+---
+diff --git a/sound/soc/qcom/qdsp6/q6afe.c b/sound/soc/qcom/qdsp6/q6afe.c
+index 528f3628f..16b1cfed1 100644
+--- a/sound/soc/qcom/qdsp6/q6afe.c
++++ b/sound/soc/qcom/qdsp6/q6afe.c
+@@ -396,6 +396,7 @@ struct q6afe {
+ 	wait_queue_head_t wait;
+ 	struct list_head port_list;
+ 	spinlock_t port_list_lock;
++	u32 lpass_hw_handle;	/* from the last LPASS core HW vote */
+ };
+ 
+ struct afe_port_cmd_device_start {
+@@ -1036,6 +1037,9 @@ static int q6afe_callback(struct apr_device *adev, const struct apr_resp_pkt *da
+ 				wake_up(&afe->wait);
+ 			}
+ 			break;
++		case AFE_CMD_REMOTE_LPASS_CORE_HW_DEVOTE_REQUEST:
++			/* sent without waiting; errors are printed above */
++			break;
+ 		default:
+ 			dev_err(afe->dev, "Unknown cmd 0x%x\n",	res->opcode);
+ 			break;
+@@ -1043,8 +1047,11 @@ static int q6afe_callback(struct apr_device *adev, const struct apr_resp_pkt *da
+ 	}
+ 		break;
+ 	case AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST:
++		/* the payload is the client handle alone, no status word */
++		if (data->payload_size >= sizeof(u32))
++			afe->lpass_hw_handle = *(const u32 *)data->payload;
+ 		afe->result.opcode = hdr->opcode;
+-		afe->result.status = res->status;
++		afe->result.status = 0;
+ 		wake_up(&afe->wait);
+ 		break;
+ 	default:
+@@ -1958,6 +1965,8 @@ int q6afe_vote_lpass_core_hw(struct device *dev, uint32_t hw_block_id,
+ 			       AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST);
+ 	if (ret)
+ 		dev_err(afe->dev, "AFE failed to vote (%d)\n", hw_block_id);
++	else
++		*client_handle = afe->lpass_hw_handle;
+ 
+ 	return ret;
+ }
