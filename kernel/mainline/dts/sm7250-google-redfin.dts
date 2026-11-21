@@ -9,6 +9,7 @@
  */
 /dts-v1/;
 
+#include <dt-bindings/dma/qcom-gpi.h>
 #include <dt-bindings/arm/qcom,ids.h>
 #include <dt-bindings/clock/qcom,dispcc-sm8250.h>
 #include <dt-bindings/clock/qcom,dsi-phy-28nm.h>
@@ -916,6 +917,31 @@
 	};
 
 	/*
+	 * QUP wrapper 0 GPI DMA (live DT qcom,gpi-dma@800000: SPI 244-253,
+	 * 5 channels for the AP, EE offset 0x10000, SMMU stream 0x4f6); the
+	 * SM6350 block is the same. SE4's FIFO is disabled by firmware, so it
+	 * needs this.
+	 */
+	gpi_dma0: dma-controller@800000 {
+		compatible = "qcom,sm6350-gpi-dma";
+		reg = <0x0 0x00800000 0x0 0x60000>;
+		interrupts = <GIC_SPI 244 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 245 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 246 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 247 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 248 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 249 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 250 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 251 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 252 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 253 IRQ_TYPE_LEVEL_HIGH>;
+		dma-channels = <10>;
+		dma-channel-mask = <0x1f>;
+		iommus = <&apps_smmu 0x4f6 0x0>;
+		#dma-cells = <3>;
+	};
+
+	/*
 	 * QUP wrapper 0 (live DT qcom,qupv3_0_geni_se@8c0000, SMMU stream
 	 * 0x4e3). Only SE0 and SE5 are described: SE1 (0x884000, GPIOs 0-3)
 	 * belongs to TrustZone, see &tlmm.
@@ -971,6 +997,46 @@
 					    <&touch_switch_default>;
 				touchscreen-size-x = <1080>;
 				touchscreen-size-y = <2340>;
+			};
+		};
+
+		/*
+		 * RT5514 DSP SPI port (downstream lito-qupv3 qupv3_se4_spi +
+		 * lito-redbull-audio mnh-spi@0: SPI 605, pins 29-32 function
+		 * qup04, drive 6; mode 3, 20 MHz on the RT5514P, 10 MHz here).
+		 * Used only to load the DSP firmware, see &rt5514.
+		 */
+		spi4: spi@890000 {
+			compatible = "qcom,geni-spi";
+			reg = <0x0 0x00890000 0x0 0x4000>;
+			clock-names = "se";
+			clocks = <&gcc GCC_QUPV3_WRAP0_S4_CLK>;
+			interrupts = <GIC_SPI 605 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&rpmhpd RPMHPD_CX>;
+			operating-points-v2 = <&qup_opp_table>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&qup_spi4_default>;
+			dmas = <&gpi_dma0 0 4 QCOM_GPI_SPI>,
+			       <&gpi_dma0 1 4 QCOM_GPI_SPI>;
+			dma-names = "tx", "rx";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			/* Bring-up only, with patches/wip/0009 (Test 167) */
+			status = "disabled";
+
+			/*
+			 * No IRQ (TLMM 65, hotword events) for now. TLMM 66 is
+			 * the AP's "SPI wanted" handshake to the CHRE, held
+			 * high; its ack (TLMM 11) is not used.
+			 */
+			audio-codec@0 {
+				compatible = "realtek,rt5514";
+				reg = <0>;
+				spi-max-frequency = <10000000>;
+				spi-cpol;
+				spi-cpha;
+				pinctrl-names = "default";
+				pinctrl-0 = <&rt5514_handshake_default>;
 			};
 		};
 
@@ -1691,8 +1757,10 @@
 		/*
 		 * RT5514 (lito-redbull-audio: reset GPIO 91 high; its DMICs
 		 * are powered by "Audio LDO Mic1/2", PM7250B GPIO 6 and
-		 * PM8150L GPIO 6, see vreg_mic_ldo1/2). Its own DSP (hotword, over
-		 * SPI on QUP0 SE4) is not used.
+		 * PM8150L GPIO 6, see vreg_mic_ldo1/2). On this RT5514P the I2S
+		 * stream comes from its DSP; its firmware is loaded over SPI
+		 * (&spi4) by "DSP I2S Capture Switch" (WIP patch 0009; SPI reads
+		 * return zeros so far, Test 167).
 		 */
 		rt5514: audio-codec@57 {
 			compatible = "realtek,rt5514";
@@ -1817,6 +1885,22 @@
 		function = "qup00";
 		drive-strength = <6>;
 		bias-disable;
+	};
+
+	/* Downstream lito-pinctrl qupv3_se4_spi_active (RT5514 DSP) */
+	qup_spi4_default: qup-spi4-default-state {
+		pins = "gpio29", "gpio30", "gpio31", "gpio32";
+		function = "qup04";
+		drive-strength = <6>;
+		bias-disable;
+	};
+
+	/* Downstream lito-redbull-audio rt5514_handshake */
+	rt5514_handshake_default: rt5514-handshake-default-state {
+		pins = "gpio66";
+		function = "gpio";
+		drive-strength = <2>;
+		output-high;
 	};
 
 	/* Downstream lito-redfin-touch sec_ts_irq_default */
