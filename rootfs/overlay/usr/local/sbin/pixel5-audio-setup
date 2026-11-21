@@ -32,7 +32,9 @@ until [ -e /run/pixel5-fw/rt5514p_dsp_fw4.bin ]; do
 	[ "$i" -ge 60 ] && { echo "no RT5514P DSP firmware"; exit 0; }
 	sleep 1
 done
-set_ "DSP I2S Capture Switch" on
+# the driver resets and retries a failed load itself; retry once more here
+amixer -q -c G5 cset name="DSP I2S Capture Switch" on 2>/dev/null ||
+	{ sleep 5; set_ "DSP I2S Capture Switch" on; }
 set_ "Stereo1 DMIC Mux" DMIC1
 set_ "Sto1 ADC MIXL DMIC Switch" on
 set_ "Sto1 ADC MIXR DMIC Switch" on

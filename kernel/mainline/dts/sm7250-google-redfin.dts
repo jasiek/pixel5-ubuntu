@@ -1764,6 +1764,7 @@
 		rt5514: audio-codec@57 {
 			compatible = "realtek,rt5514";
 			reg = <0x57>;
+			reset-gpios = <&tlmm 91 GPIO_ACTIVE_LOW>;
 			pinctrl-names = "default";
 			pinctrl-0 = <&rt5514_reset_default>;
 			#sound-dai-cells = <1>;

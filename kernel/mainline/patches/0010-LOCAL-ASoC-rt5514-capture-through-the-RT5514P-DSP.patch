@@ -22,13 +22,25 @@ Register values, firmware names and load addresses are from that driver.
   writes clock and power registers too, and DAPM's read-modify-write
   from the cache overwrote them (CLK_CTRL1 back to its default DMIC
   clock divider, so the microphones gave no signal);
-- the DSP registers the above uses are readable over I2C.
+- the DSP registers the above uses are readable over I2C;
+- optional reset-gpios: a failed load can leave the chip reading zeros
+  on I2C until reset (at boot, about every second time, cause unknown),
+  so the control resets the chip, re-syncs the cache and retries, up to
+  three attempts.
 ---
 diff --git a/sound/soc/codecs/rt5514.c b/sound/soc/codecs/rt5514.c
-index a33fbc9fb..ea50c8211 100644
+index a33fbc9fb..e563c69ec 100644
 --- a/sound/soc/codecs/rt5514.c
 +++ b/sound/soc/codecs/rt5514.c
-@@ -145,6 +145,16 @@ static void rt5514_enable_dsp_prepare(struct rt5514_priv *rt5514)
+@@ -17,6 +17,7 @@
+ #include <linux/i2c.h>
+ #include <linux/platform_device.h>
+ #include <linux/firmware.h>
++#include <linux/gpio/consumer.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+@@ -145,6 +146,16 @@ static void rt5514_enable_dsp_prepare(struct rt5514_priv *rt5514)
  
  static bool rt5514_volatile_register(struct device *dev, unsigned int reg)
  {
@@ -45,7 +57,7 @@ index a33fbc9fb..ea50c8211 100644
  	switch (reg) {
  	case RT5514_VENDOR_ID1:
  	case RT5514_VENDOR_ID2:
-@@ -263,6 +273,11 @@ static bool rt5514_i2c_readable_register(struct device *dev,
+@@ -263,6 +274,11 @@ static bool rt5514_i2c_readable_register(struct device *dev,
  	case RT5514_DSP_MAPPING | RT5514_DSP_CTRL4:
  	case RT5514_DSP_MAPPING | RT5514_VENDOR_ID1:
  	case RT5514_DSP_MAPPING | RT5514_VENDOR_ID2:
@@ -57,7 +69,7 @@ index a33fbc9fb..ea50c8211 100644
  		return true;
  
  	default:
-@@ -283,6 +298,183 @@ static const DECLARE_TLV_DB_RANGE(bst_tlv,
+@@ -283,6 +299,203 @@ static const DECLARE_TLV_DB_RANGE(bst_tlv,
  
  static const DECLARE_TLV_DB_SCALE(adc_vol_tlv, -1725, 75, 0);
  
@@ -218,20 +230,40 @@ index a33fbc9fb..ea50c8211 100644
 +{
 +	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 +	struct rt5514_priv *rt5514 = snd_soc_component_get_drvdata(component);
-+	unsigned int id = 0;
-+	int ret;
++	unsigned int id;
++	int ret = 0, try;
 +
 +	/* one way: load and start once, while no stream runs */
 +	if (!ucontrol->value.integer.value[0] || rt5514->dsp_i2s)
 +		return 0;
 +	if (snd_soc_component_active(component))
 +		return -EBUSY;
-+	/* only the RT5514P sequence and firmware are known */
-+	regmap_read(rt5514->regmap, RT5514_VENDOR_ID1, &id);
-+	if (id != 0x80)
-+		return -ENODEV;
 +
-+	ret = rt5514p_dsp_load(rt5514);
++	/*
++	 * A failed load can leave the chip answering zeros on I2C until it
++	 * is reset (seen at boot on the Pixel 5, cause unknown): reset and
++	 * try again.
++	 */
++	for (try = 0; try < 3; try++) {
++		if (try) {
++			dev_warn(component->dev, "DSP load attempt %d failed: %d\n",
++				 try, ret);
++			if (!rt5514->reset)
++				break;
++			gpiod_set_value_cansleep(rt5514->reset, 1);
++			usleep_range(1000, 2000);
++			gpiod_set_value_cansleep(rt5514->reset, 0);
++			usleep_range(10000, 15000);
++			regcache_mark_dirty(rt5514->regmap);
++			regcache_sync(rt5514->regmap);
++		}
++		/* only the RT5514P sequence and firmware are known */
++		id = 0;
++		regmap_read(rt5514->regmap, RT5514_VENDOR_ID1, &id);
++		ret = id == 0x80 ? rt5514p_dsp_load(rt5514) : -ENODEV;
++		if (!ret)
++			break;
++	}
 +	if (ret)
 +		return ret;
 +	rt5514->dsp_i2s = true;
@@ -241,7 +273,7 @@ index a33fbc9fb..ea50c8211 100644
  static int rt5514_dsp_voice_wake_up_get(struct snd_kcontrol *kcontrol,
  		struct snd_ctl_elem_value *ucontrol)
  {
-@@ -433,6 +625,8 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
+@@ -433,6 +646,8 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
  		adc_vol_tlv),
  	SOC_SINGLE_EXT("DSP Voice Wake Up", SND_SOC_NOPM, 0, 1, 0,
  		rt5514_dsp_voice_wake_up_get, rt5514_dsp_voice_wake_up_put),
@@ -250,7 +282,7 @@ index a33fbc9fb..ea50c8211 100644
  };
  
  /* ADC Mixer*/
-@@ -756,6 +950,16 @@ static int rt5514_hw_params(struct snd_pcm_substream *substream,
+@@ -756,6 +971,16 @@ static int rt5514_hw_params(struct snd_pcm_substream *substream,
  	int pre_div, bclk_ms, frame_size;
  	unsigned int val_len = 0;
  
@@ -267,7 +299,7 @@ index a33fbc9fb..ea50c8211 100644
  	rt5514->lrck = params_rate(params);
  	pre_div = rl6231_get_clk_info(rt5514->sysclk, rt5514->lrck);
  	if (pre_div < 0) {
-@@ -1140,12 +1344,66 @@ static const u64 rt5514_selectable_formats =
+@@ -1140,12 +1365,66 @@ static const u64 rt5514_selectable_formats =
  	SND_SOC_POSSIBLE_DAIFMT_IB_NF	|
  	SND_SOC_POSSIBLE_DAIFMT_IB_IF;
  
@@ -338,15 +370,28 @@ index a33fbc9fb..ea50c8211 100644
  	.auto_selectable_formats = &rt5514_selectable_formats,
  	.num_auto_selectable_formats = 1,
  };
+@@ -1273,6 +1552,11 @@ static int rt5514_i2c_probe(struct i2c_client *i2c)
+ 	else
+ 		rt5514_parse_dp(rt5514, &i2c->dev);
+ 
++	rt5514->reset = devm_gpiod_get_optional(&i2c->dev, "reset",
++						GPIOD_OUT_LOW);
++	if (IS_ERR(rt5514->reset))
++		return PTR_ERR(rt5514->reset);
++
+ 	rt5514->mclk = devm_clk_get_optional(&i2c->dev, "mclk");
+ 	if (IS_ERR(rt5514->mclk))
+ 		return PTR_ERR(rt5514->mclk);
 diff --git a/sound/soc/codecs/rt5514.h b/sound/soc/codecs/rt5514.h
-index 75755599f..26ff128a3 100644
+index 75755599f..3c2056aa6 100644
 --- a/sound/soc/codecs/rt5514.h
 +++ b/sound/soc/codecs/rt5514.h
-@@ -281,6 +281,7 @@ struct rt5514_priv {
+@@ -281,6 +281,8 @@ struct rt5514_priv {
  	int pll_out;
  	int dsp_enabled;
  	unsigned int pll3_cal_value;
 +	bool dsp_i2s;		/* RT5514P DSP produces the I2S stream */
++	struct gpio_desc *reset;	/* optional, active low */
  };
  
  #endif /* __RT5514_H__ */
