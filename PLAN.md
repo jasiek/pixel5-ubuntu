@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P6.4: audio. Speakers done (needs an owner listen + a boot_b flash with OK); mics blocked on the RT5514 DSP path. Open owner items: P7.2 gate (someone else installs from the README), nairo licence.
+## ▶ RESUME HERE: P6.4: audio. Speakers done and flashed (Test 164; owner listen pending); mics blocked on the RT5514 DSP path (docs/research/rt5514-dsp.md). Open owner items: P7.2 gate (someone else installs from the README), nairo licence.
 
 ---
 

@@ -54,9 +54,9 @@ project at `../ubuntu-touch-pixel2`; same methods, rules and lessons.
   footer the bootloader refuses it, and then even `fastboot boot` fails.
   Since 2026-11-20 (P6.5) that is **mainline**
   (`scripts/build-mainline-test.sh default`, header v2 with its own DTB;
-  since Test 145 release `gdde418e2a1a3` with display and touch).
-  Back to the previous mainline (display, no touch):
-  `fastboot flash boot_b build/backup/boot_b-mainline-g939364b514ec-2026-11-21.img`.
+  since Test 164 release `g62ce6353bb75` with display, touch and speakers).
+  Back to the previous mainline (display + touch, no audio):
+  `fastboot flash boot_b build/backup/boot_b-mainline-gdde418e2a1a3-2026-11-21.img`.
   Back to downstream: `fastboot flash boot_b build/backup/boot_b-downstream-2026-11-20.img`
   (header v3, uses `vendor_boot_b`; `AVB_FOOTER=1 scripts/make-bootimg.sh`
   rebuilds it). A plain mainline reboot shows `bootreason=watchdog`: expected
