@@ -53,11 +53,14 @@ Status: not started. Plain capture (mainline path) gives exact zeros
 
 ## Next leads
 
-1. The handshake: drive TLMM 66 low, then high, and watch TLMM 11 (the
-   CHRE's ack, falling edge). If the ADSP never answers, the sensor
-   firmware may own the switch or the RT5514 SPI port.
-2. Whether the ADSP sensor stack (`pixel5-see`) opens the RT5514 SPI link
+1. ~~The handshake~~ (Test 168): TLMM 11 is held low and never moves
+   when TLMM 66 toggles; by downstream's level-low rule that is an
+   immediate ack, so it does not block the bus.
+2. Power of the SPI switch IC: it may sit on a rail that only Android
+   enables (no rail is named in the downstream DT; needs a schematic or
+   a rail-by-rail test).
+3. Whether the ADSP sensor stack (`pixel5-see`) opens the RT5514 SPI link
    itself (downstream CHRE "SPI_SWITCH_MASK_CHRE_QMI").
-3. Scope or logic probe on the SE4 lines, if the owner has one: shows
+4. Scope or logic probe on the SE4 lines, if the owner has one: shows
    whether CS and SCLK toggle and whether MISO ever moves.
 
