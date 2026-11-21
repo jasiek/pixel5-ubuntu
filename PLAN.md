@@ -137,8 +137,14 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
   - Gate: someone else flashes a phone using only README + `flash.sh`.
 - [x] **P7.3** README: install flow. _Done 2026-11-20; repo public at github.com/jasiek/pixel5-ubuntu._
 
+## Phase 8: Hardware video encoding (owner request 2026-11-21)
+Research: `docs/research/video.md` (IRIS1 core, SM8150-style videocc, TZ PAS 9).
+- [ ] **P8.1** Video clock controller (local patch 0014, `qcom,sm7250-videocc`): probes, GDSCs switch.
+- [ ] **P8.2** Venus resources (local patch 0015) + DT nodes; TZ starts the firmware (PAS 9) and HFI init answers.
+- [ ] **P8.3** H.264 encode through V4L2 (`v4l2-ctl` or GStreamer `v4l2h264enc`), measured (fps, CPU, power).
+
 ## Parked (research problems; pick up only on request)
-Cameras (no SM7250 CAMSS, no IMX363/IMX481 drivers), rear fingerprint (TrustZone), CDSP + Venus video (TZ refuses on other SM7250 phones), wireless charging (P9382), 5G NR and VoLTE (unproven anywhere), NFC (ST21NFC fit unverified), modem data/SMS on downstream (needs a SIM).
+Cameras (no SM7250 CAMSS, no IMX363/IMX481 drivers), rear fingerprint (TrustZone), wireless charging (P9382), 5G NR and VoLTE (unproven anywhere), NFC (ST21NFC fit unverified), modem data/SMS on downstream (needs a SIM).
 
 ## Open questions (verify on the phone, cheapest first)
 1. Firmware file names in `/vendor/firmware` and `modem_a:image/` (P1.6).

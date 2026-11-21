@@ -1,0 +1,355 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Sat, 21 Nov 2026 23:30:00 +0000
+Subject: [PATCH] LOCAL: clk: qcom: add the SM7250 video clock controller
+
+SM7250 ("lito") has SM8150's video clock controller layout (PLL0 at
+0x42c, iris_clk_src at 0x7f0, MVSC/MVS0/MVS1 core branches and GDSCs at
+the same offsets), but a Lucid PLL with its own configuration, a 240-533
+MHz table, AXI and AHB branches for the IRIS1 core, and the always-on XO
+branch at 0x980 (0x984 is the sleep clock RCG here, which SM8150's probe
+writes). Values from the downstream videocc-lito.c.
+---
+ drivers/clk/qcom/Kconfig                      |  12 +
+ drivers/clk/qcom/Makefile                     |   1 +
+ drivers/clk/qcom/videocc-sm7250.c             | 257 ++++++++++++++++++
+ .../dt-bindings/clock/qcom,videocc-sm7250.h   |  31 +++
+ 4 files changed, 301 insertions(+)
+ create mode 100644 drivers/clk/qcom/videocc-sm7250.c
+ create mode 100644 include/dt-bindings/clock/qcom,videocc-sm7250.h
+
+diff --git a/drivers/clk/qcom/Kconfig b/drivers/clk/qcom/Kconfig
+index 5cf598c3a..e9b900ff4 100644
+--- a/drivers/clk/qcom/Kconfig
++++ b/drivers/clk/qcom/Kconfig
+@@ -2051,6 +2051,18 @@ config SM_VIDEOCC_MILOS
+ 	  Say Y if you want to support video devices and functionality such as
+ 	  video encode/decode.
+ 
++config SM_VIDEOCC_7250
++	tristate "SM7250 Video Clock Controller"
++	depends on ARM64 || COMPILE_TEST
++	depends on SM_GCC_7250
++	select QCOM_GDSC
++	default m if ARCH_QCOM
++	help
++	  Support for the video clock controller on Qualcomm Technologies, Inc
++	  SM7250 devices.
++	  Say Y if you want to support video devices and functionality such as
++	  video encode/decode.
++
+ config SM_VIDEOCC_8150
+ 	tristate "SM8150 Video Clock Controller"
+ 	depends on ARM64 || COMPILE_TEST
+diff --git a/drivers/clk/qcom/Makefile b/drivers/clk/qcom/Makefile
+index 290bd2e9c..52f1c08c5 100644
+--- a/drivers/clk/qcom/Makefile
++++ b/drivers/clk/qcom/Makefile
+@@ -220,6 +220,7 @@ obj-$(CONFIG_SM_TCSRCC_8650) += tcsrcc-sm8650.o
+ obj-$(CONFIG_SM_TCSRCC_8750) += tcsrcc-sm8750.o
+ obj-$(CONFIG_SM_VIDEOCC_6350) += videocc-sm6350.o
+ obj-$(CONFIG_SM_VIDEOCC_7150) += videocc-sm7150.o
++obj-$(CONFIG_SM_VIDEOCC_7250) += videocc-sm7250.o
+ obj-$(CONFIG_SM_VIDEOCC_8150) += videocc-sm8150.o
+ obj-$(CONFIG_SM_VIDEOCC_8250) += videocc-sm8250.o
+ obj-$(CONFIG_SM_VIDEOCC_8350) += videocc-sm8350.o
+diff --git a/drivers/clk/qcom/videocc-sm7250.c b/drivers/clk/qcom/videocc-sm7250.c
+new file mode 100644
+index 000000000..491f75b4c
+--- /dev/null
++++ b/drivers/clk/qcom/videocc-sm7250.c
+@@ -0,0 +1,257 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ *
++ * SM7250 ("lito") video clock controller. The register layout is the
++ * SM8150 one (videocc-sm8150.c); the PLL is a Lucid with its own
++ * configuration, and the AXI/AHB branches the IRIS1 core needs are added.
++ * Values from the downstream videocc-lito.c.
++ */
++
++#include <linux/clk-provider.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/regmap.h>
++
++#include <dt-bindings/clock/qcom,videocc-sm7250.h>
++
++#include "common.h"
++#include "clk-alpha-pll.h"
++#include "clk-branch.h"
++#include "clk-rcg.h"
++#include "clk-regmap.h"
++#include "reset.h"
++#include "gdsc.h"
++
++enum {
++	P_BI_TCXO,
++	P_VIDEO_PLL0_OUT_MAIN,
++};
++
++static const struct pll_vco lucid_vco[] = {
++	{ 249600000, 2000000000, 0 },
++};
++
++static const struct alpha_pll_config video_pll0_config = {
++	.l = 0x19,
++	.cal_l = 0x44,
++	.alpha = 0x0,
++	.config_ctl_val = 0x20485699,
++	.config_ctl_hi_val = 0x00002261,
++	.config_ctl_hi1_val = 0x329a699c,
++	.user_ctl_val = 0x00000001,
++	.user_ctl_hi_val = 0x00000805,
++	.user_ctl_hi1_val = 0x00000000,
++	.test_ctl_hi1_val = 0x01800000,
++};
++
++static struct clk_alpha_pll video_pll0 = {
++	.offset = 0x42c,
++	.vco_table = lucid_vco,
++	.num_vco = ARRAY_SIZE(lucid_vco),
++	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
++	.clkr = {
++		.hw.init = &(const struct clk_init_data) {
++			.name = "video_pll0",
++			.parent_data = &(const struct clk_parent_data) {
++				.fw_name = "bi_tcxo",
++			},
++			.num_parents = 1,
++			.ops = &clk_alpha_pll_lucid_ops,
++		},
++	},
++};
++
++static const struct parent_map video_cc_parent_map_0[] = {
++	{ P_BI_TCXO, 0 },
++	{ P_VIDEO_PLL0_OUT_MAIN, 1 },
++};
++
++static const struct clk_parent_data video_cc_parent_data_0[] = {
++	{ .fw_name = "bi_tcxo" },
++	{ .hw = &video_pll0.clkr.hw },
++};
++
++static const struct freq_tbl ftbl_video_cc_iris_clk_src[] = {
++	F(240000000, P_VIDEO_PLL0_OUT_MAIN, 2, 0, 0),
++	F(338000000, P_VIDEO_PLL0_OUT_MAIN, 2, 0, 0),
++	F(365000000, P_VIDEO_PLL0_OUT_MAIN, 2, 0, 0),
++	F(444000000, P_VIDEO_PLL0_OUT_MAIN, 2, 0, 0),
++	F(533000000, P_VIDEO_PLL0_OUT_MAIN, 2, 0, 0),
++	{ }
++};
++
++static struct clk_rcg2 video_cc_iris_clk_src = {
++	.cmd_rcgr = 0x7f0,
++	.mnd_width = 0,
++	.hid_width = 5,
++	.parent_map = video_cc_parent_map_0,
++	.freq_tbl = ftbl_video_cc_iris_clk_src,
++	.clkr.hw.init = &(const struct clk_init_data) {
++		.name = "video_cc_iris_clk_src",
++		.parent_data = video_cc_parent_data_0,
++		.num_parents = ARRAY_SIZE(video_cc_parent_data_0),
++		.flags = CLK_SET_RATE_PARENT,
++		.ops = &clk_rcg2_shared_ops,
++	},
++};
++
++#define VIDEO_CC_CORE_BRANCH(_name, _reg, _check)			\
++static struct clk_branch _name = {					\
++	.halt_reg = _reg,						\
++	.halt_check = _check,						\
++	.clkr = {							\
++		.enable_reg = _reg,					\
++		.enable_mask = BIT(0),					\
++		.hw.init = &(const struct clk_init_data) {		\
++			.name = #_name,					\
++			.parent_hws = (const struct clk_hw*[]) {	\
++				&video_cc_iris_clk_src.clkr.hw,		\
++			},						\
++			.num_parents = 1,				\
++			.flags = CLK_SET_RATE_PARENT,			\
++			.ops = &clk_branch2_ops,			\
++		},							\
++	},								\
++}
++
++#define VIDEO_CC_BRANCH(_name, _reg)					\
++static struct clk_branch _name = {					\
++	.halt_reg = _reg,						\
++	.halt_check = BRANCH_HALT,					\
++	.clkr = {							\
++		.enable_reg = _reg,					\
++		.enable_mask = BIT(0),					\
++		.hw.init = &(const struct clk_init_data) {		\
++			.name = #_name,					\
++			.ops = &clk_branch2_ops,			\
++		},							\
++	},								\
++}
++
++VIDEO_CC_CORE_BRANCH(video_cc_mvs0_core_clk, 0x890, BRANCH_VOTED);
++VIDEO_CC_CORE_BRANCH(video_cc_mvs1_core_clk, 0x8d0, BRANCH_VOTED);
++VIDEO_CC_CORE_BRANCH(video_cc_mvsc_core_clk, 0x850, BRANCH_HALT);
++VIDEO_CC_BRANCH(video_cc_mvs0_axi_clk, 0x9ec);
++VIDEO_CC_BRANCH(video_cc_mvs1_axi_clk, 0xa0c);
++VIDEO_CC_BRANCH(video_cc_mvsc_ctl_axi_clk, 0x9cc);
++VIDEO_CC_BRANCH(video_cc_venus_ahb_clk, 0xa6c);
++
++static struct gdsc mvsc_gdsc = {
++	.gdscr = 0x814,
++	.pd = {
++		.name = "mvsc_gdsc",
++	},
++	.pwrsts = PWRSTS_OFF_ON,
++};
++
++static struct gdsc mvs0_gdsc = {
++	.gdscr = 0x874,
++	.pd = {
++		.name = "mvs0_gdsc",
++	},
++	.flags = HW_CTRL_TRIGGER,
++	.pwrsts = PWRSTS_OFF_ON,
++};
++
++static struct gdsc mvs1_gdsc = {
++	.gdscr = 0x8b4,
++	.pd = {
++		.name = "mvs1_gdsc",
++	},
++	.flags = HW_CTRL_TRIGGER,
++	.pwrsts = PWRSTS_OFF_ON,
++};
++
++static struct clk_regmap *video_cc_sm7250_clocks[] = {
++	[VIDEO_CC_PLL0] = &video_pll0.clkr,
++	[VIDEO_CC_IRIS_CLK_SRC] = &video_cc_iris_clk_src.clkr,
++	[VIDEO_CC_MVS0_AXI_CLK] = &video_cc_mvs0_axi_clk.clkr,
++	[VIDEO_CC_MVS0_CORE_CLK] = &video_cc_mvs0_core_clk.clkr,
++	[VIDEO_CC_MVS1_AXI_CLK] = &video_cc_mvs1_axi_clk.clkr,
++	[VIDEO_CC_MVS1_CORE_CLK] = &video_cc_mvs1_core_clk.clkr,
++	[VIDEO_CC_MVSC_CORE_CLK] = &video_cc_mvsc_core_clk.clkr,
++	[VIDEO_CC_MVSC_CTL_AXI_CLK] = &video_cc_mvsc_ctl_axi_clk.clkr,
++	[VIDEO_CC_VENUS_AHB_CLK] = &video_cc_venus_ahb_clk.clkr,
++};
++
++static struct gdsc *video_cc_sm7250_gdscs[] = {
++	[MVSC_GDSC] = &mvsc_gdsc,
++	[MVS0_GDSC] = &mvs0_gdsc,
++	[MVS1_GDSC] = &mvs1_gdsc,
++};
++
++static const struct qcom_reset_map video_cc_sm7250_resets[] = {
++	[VIDEO_CC_INTERFACE_BCR] = { 0x9ac },
++	[VIDEO_CC_MVS0_BCR] = { 0x870 },
++	[VIDEO_CC_MVS1_BCR] = { 0x8b0 },
++	[VIDEO_CC_MVSC_BCR] = { 0x810 },
++};
++
++static const struct regmap_config video_cc_sm7250_regmap_config = {
++	.reg_bits = 32,
++	.reg_stride = 4,
++	.val_bits = 32,
++	.max_register = 0xb94,
++	.fast_io = true,
++};
++
++static const struct qcom_cc_desc video_cc_sm7250_desc = {
++	.config = &video_cc_sm7250_regmap_config,
++	.clks = video_cc_sm7250_clocks,
++	.num_clks = ARRAY_SIZE(video_cc_sm7250_clocks),
++	.resets = video_cc_sm7250_resets,
++	.num_resets = ARRAY_SIZE(video_cc_sm7250_resets),
++	.gdscs = video_cc_sm7250_gdscs,
++	.num_gdscs = ARRAY_SIZE(video_cc_sm7250_gdscs),
++};
++
++static const struct of_device_id video_cc_sm7250_match_table[] = {
++	{ .compatible = "qcom,sm7250-videocc" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, video_cc_sm7250_match_table);
++
++static int video_cc_sm7250_probe(struct platform_device *pdev)
++{
++	struct regmap *regmap;
++	int ret;
++
++	ret = devm_pm_runtime_enable(&pdev->dev);
++	if (ret)
++		return ret;
++
++	ret = pm_runtime_resume_and_get(&pdev->dev);
++	if (ret)
++		return ret;
++
++	regmap = qcom_cc_map(pdev, &video_cc_sm7250_desc);
++	if (IS_ERR(regmap)) {
++		pm_runtime_put_sync(&pdev->dev);
++		return PTR_ERR(regmap);
++	}
++
++	clk_lucid_pll_configure(&video_pll0, regmap, &video_pll0_config);
++
++	/* Keep VIDEO_CC_XO_CLK always on (critical downstream) */
++	qcom_branch_set_clk_en(regmap, 0x980);
++
++	ret = qcom_cc_really_probe(&pdev->dev, &video_cc_sm7250_desc, regmap);
++
++	pm_runtime_put_sync(&pdev->dev);
++
++	return ret;
++}
++
++static struct platform_driver video_cc_sm7250_driver = {
++	.probe = video_cc_sm7250_probe,
++	.driver = {
++		.name = "video_cc-sm7250",
++		.of_match_table = video_cc_sm7250_match_table,
++	},
++};
++module_platform_driver(video_cc_sm7250_driver);
++
++MODULE_DESCRIPTION("QTI VIDEOCC SM7250 Driver");
++MODULE_LICENSE("GPL");
+diff --git a/include/dt-bindings/clock/qcom,videocc-sm7250.h b/include/dt-bindings/clock/qcom,videocc-sm7250.h
+new file mode 100644
+index 000000000..c957b2798
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,videocc-sm7250.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_VIDEO_CC_SM7250_H
++#define _DT_BINDINGS_CLK_QCOM_VIDEO_CC_SM7250_H
++
++/* VIDEO_CC clocks */
++#define VIDEO_CC_PLL0			0
++#define VIDEO_CC_IRIS_CLK_SRC		1
++#define VIDEO_CC_MVS0_AXI_CLK		2
++#define VIDEO_CC_MVS0_CORE_CLK		3
++#define VIDEO_CC_MVS1_AXI_CLK		4
++#define VIDEO_CC_MVS1_CORE_CLK		5
++#define VIDEO_CC_MVSC_CORE_CLK		6
++#define VIDEO_CC_MVSC_CTL_AXI_CLK	7
++#define VIDEO_CC_VENUS_AHB_CLK		8
++
++/* VIDEO_CC resets */
++#define VIDEO_CC_INTERFACE_BCR		0
++#define VIDEO_CC_MVS0_BCR		1
++#define VIDEO_CC_MVS1_BCR		2
++#define VIDEO_CC_MVSC_BCR		3
++
++/* VIDEO_CC GDSCs */
++#define MVSC_GDSC			0
++#define MVS0_GDSC			1
++#define MVS1_GDSC			2
++
++#endif

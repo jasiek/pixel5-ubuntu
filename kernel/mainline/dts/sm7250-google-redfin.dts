@@ -14,6 +14,7 @@
 #include <dt-bindings/clock/qcom,dispcc-sm8250.h>
 #include <dt-bindings/clock/qcom,dsi-phy-28nm.h>
 #include <dt-bindings/clock/qcom,gpucc-sm8250.h>
+#include <dt-bindings/clock/qcom,videocc-sm7250.h>
 #include <dt-bindings/firmware/qcom,scm.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
@@ -1182,6 +1183,82 @@
 	 * clocks the bootloader leaves running after the splash. The DP PHY
 	 * clocks are not described (no DisplayPort).
 	 */
+	/*
+	 * Video clock controller: SM8150's layout with a Lucid PLL
+	 * (downstream videocc-lito.c, local driver videocc-sm7250). On CX,
+	 * as downstream (vdd_cx-supply). GCC_VIDEO_AHB_CLK is always on.
+	 */
+	videocc: clock-controller@ab00000 {
+		compatible = "qcom,sm7250-videocc";
+		reg = <0x0 0x0ab00000 0x0 0x10000>;
+		power-domains = <&rpmhpd RPMHPD_CX>;
+		required-opps = <&rpmhpd_opp_low_svs>;
+		clocks = <&rpmhcc RPMH_CXO_CLK>;
+		clock-names = "bi_tcxo";
+		#clock-cells = <1>;
+		#reset-cells = <1>;
+		#power-domain-cells = <1>;
+	};
+
+	/*
+	 * Venus (IRIS1, 2 pipes), from downstream lito-vidc.dtsi
+	 * (qcom,vidc0) and the PIL node venus@aae0000 (PAS 9, video_mem).
+	 * Non-secure context bank: SIDs 0x1380/0x60 and 0x1360. No
+	 * interconnects: no SM7250 MMSS/GEM NoC provider yet.
+	 */
+	venus: video-codec@aa00000 {
+		compatible = "qcom,sm7250-venus";
+		reg = <0x0 0x0aa00000 0x0 0x100000>;
+		interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
+
+		power-domains = <&videocc MVSC_GDSC>,
+				<&videocc MVS0_GDSC>,
+				<&rpmhpd RPMHPD_CX>;
+		power-domain-names = "venus", "vcodec0", "cx";
+		operating-points-v2 = <&venus_opp_table>;
+
+		clocks = <&videocc VIDEO_CC_MVSC_CORE_CLK>,
+			 <&videocc VIDEO_CC_VENUS_AHB_CLK>,
+			 <&videocc VIDEO_CC_MVSC_CTL_AXI_CLK>,
+			 <&gcc GCC_VIDEO_AXI_CLK>,
+			 <&videocc VIDEO_CC_MVS0_CORE_CLK>,
+			 <&videocc VIDEO_CC_MVS0_AXI_CLK>;
+		clock-names = "core", "iface", "bus", "gcc_axi",
+			      "vcodec0_core", "vcodec0_bus";
+
+		iommus = <&apps_smmu 0x1380 0x60>,
+			 <&apps_smmu 0x1360 0x0>;
+		memory-region = <&video_mem>;
+
+		video-decoder {
+			compatible = "venus-decoder";
+		};
+
+		video-encoder {
+			compatible = "venus-encoder";
+		};
+
+		/* SKU 0 rates; CX corners from videocc-lito rate_max */
+		venus_opp_table: opp-table {
+			compatible = "operating-points-v2";
+
+			opp-240000000 {
+				opp-hz = /bits/ 64 <240000000>;
+				required-opps = <&rpmhpd_opp_low_svs>;
+			};
+
+			opp-338000000 {
+				opp-hz = /bits/ 64 <338000000>;
+				required-opps = <&rpmhpd_opp_svs>;
+			};
+
+			opp-365000000 {
+				opp-hz = /bits/ 64 <365000000>;
+				required-opps = <&rpmhpd_opp_svs_l1>;
+			};
+		};
+	};
+
 	dispcc: clock-controller@af00000 {
 		compatible = "qcom,sm7250-dispcc";
 		reg = <0x0 0x0af00000 0x0 0x20000>;
