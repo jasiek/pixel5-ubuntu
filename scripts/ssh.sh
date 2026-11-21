@@ -6,4 +6,4 @@
 cd "$(dirname "$0")/.."
 exec ssh -i build/ssh/pixel5_ed25519 -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR \
-    "ubuntu@${PIXEL5_HOST:-172.16.42.1}" "$@"
+    "ubuntu@${PIXEL5_HOST:-172.16.43.1}" "$@"

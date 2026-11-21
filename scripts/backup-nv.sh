@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # P2.4: back up the IMEI / calibration partitions from the initramfs debug
-# shell (scripts/initrd-sh.py, phone at 172.16.42.1) to firmware/backup/.
+# shell (scripts/initrd-sh.py, phone at 172.16.43.1) to firmware/backup/.
 #
 #   scripts/backup-nv.sh [partition ...]   (default: persist modemst1 modemst2 fsg fsc)
 #
@@ -10,7 +10,7 @@
 # committed (firmware/ is gitignored) and never leave the Mac.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-PHONE=172.16.42.1
+PHONE=172.16.43.1
 PORT=5000
 OUT=firmware/backup
 mkdir -p "$OUT"

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # P3.3: boot the Ubuntu rootfs from RAM, tethered, without flashing userdata.
 #
-#   scripts/ramroot.sh            (phone in the initramfs debug shell, 172.16.42.1)
+#   scripts/ramroot.sh            (phone in the initramfs debug shell, 172.16.43.1)
 #
 # Unpacks build/rootfs-final.tar (scripts/build-rootfs.sh) into a tmpfs on
 # /newroot, drops the userdata line from its fstab (root is the tmpfs), and
@@ -11,7 +11,7 @@
 # reboot forgets it all.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-PHONE=172.16.42.1
+PHONE=172.16.43.1
 PORT=5002
 TAR=build/rootfs-final.tar
 [ -f "$TAR" ] || { echo "no $TAR: run scripts/build-rootfs.sh" >&2; exit 1; }

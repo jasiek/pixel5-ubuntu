@@ -51,7 +51,7 @@ t1)
     ;;
 t3)
     # Our normal init without modules (mainline drivers are built in), held
-    # in its debug shell: USB NCM (telnet 172.16.42.1) + ACM serial shell
+    # in its debug shell: USB NCM (telnet 172.16.43.1) + ACM serial shell
     # (scripts/serial-sh.py). Back to fastboot after TIMEOUT s (default 300).
     KMODS=0 /work/scripts/build-initramfs.sh initramfs/init "${T#/work/}/initramfs.cpio.lz4" >/dev/null
     RD=$T/initramfs.cpio.lz4

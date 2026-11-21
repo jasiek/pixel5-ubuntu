@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Copy one file from the initramfs debug shell (172.16.42.1) to the Mac,
+# Copy one file from the initramfs debug shell (172.16.43.1) to the Mac,
 # checked with SHA-256 on both ends.
 #
 #   scripts/initrd-pull.sh <path on phone> <local file>
@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 [ $# -eq 2 ] || { echo "usage: $0 <remote path> <local file>" >&2; exit 2; }
 remote=$1; local_file=$2
-PHONE=172.16.42.1
+PHONE=172.16.43.1
 PORT=5001
 
 # Sysfs files report size 4096 or 0; copy to /tmp first for a real size.

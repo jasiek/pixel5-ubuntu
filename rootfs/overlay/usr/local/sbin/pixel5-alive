@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Headless "alive" signal (P5.5, owner's choice: vibration at boot).
 #   2 short buzzes: booted, wlan0 connected (SSH over wifi works)
-#   1 long buzz:    booted, but no wifi after 90 s (use USB: 172.16.42.1)
+#   1 long buzz:    booted, but no wifi after 90 s (use USB: 172.16.43.1)
 #   pixel5-alive buzz <ms>    one pulse, for testing
 # Downstream 4.19: the DRV2624 (drv2624.ko) is an LED-class device in
 # real-time mode: brightness 1 starts the motor, 0 stops it.

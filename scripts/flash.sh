@@ -161,12 +161,12 @@ ok "written"
 fastboot reboot || true
 
 say 5 "Wait for Ubuntu"
-echo "Waiting up to 10 min for SSH (USB 172.16.42.1 or wifi pixel5.local)..."
+echo "Waiting up to 10 min for SSH (USB 172.16.43.1 or wifi pixel5.local)..."
 echo "The first boot grows the filesystem to the whole partition; it takes a little longer."
 KEY=build/ssh/pixel5_ed25519
 up=""
 for _ in $(seq 120); do
-    for h in 172.16.42.1 pixel5.local; do
+    for h in 172.16.43.1 pixel5.local; do
         if nc -z -G 2 "$h" 22 >/dev/null 2>&1; then up=$h; break 2; fi
     done
     sleep 5

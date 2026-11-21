@@ -4,7 +4,7 @@
 # then switch_root into systemd.
 #
 # Debugging over USB (works even if Ubuntu never starts):
-#   - USB network: NCM, phone 172.16.42.1, DHCP for the host, telnet on port 23
+#   - USB network: NCM, phone 172.16.43.1, DHCP for the host, telnet on port 23
 #   - USB serial:  ACM, getty with a root shell on /dev/ttyGS0
 # Add "initdebug" to the kernel cmdline to stop here on purpose.
 # Messages go to /dev/kmsg, so they also land in dmesg / pstore.
@@ -188,18 +188,18 @@ handover() {
 debug_shell() {
     log "entering debug mode: $*"
     devnodes
-    ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up
+    ifconfig usb0 172.16.43.1 netmask 255.255.255.0 up
     cat > /tmp/udhcpd.conf <<EOF
-start 172.16.42.2
-end 172.16.42.20
+start 172.16.43.2
+end 172.16.43.20
 interface usb0
 option subnet 255.255.255.0
 lease_file /tmp/udhcpd.leases
 EOF
     touch /tmp/udhcpd.leases
     udhcpd /tmp/udhcpd.conf
-    telnetd -b 172.16.42.1:23 -l /bin/sh
-    log "telnet 172.16.42.1 (debug shell); log: /tmp/init.log; pstore: /sys/fs/pstore"
+    telnetd -b 172.16.43.1:23 -l /bin/sh
+    log "telnet 172.16.43.1 (debug shell); log: /tmp/init.log; pstore: /sys/fs/pstore"
     mkdir -p /sys/fs/pstore
     mount -t pstore pstore /sys/fs/pstore 2>/dev/null
     # Fastboot-return timer: started at the top (initdebug). Without

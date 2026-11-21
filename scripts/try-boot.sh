@@ -7,12 +7,12 @@
 # Gets the phone into fastboot from wherever it is (Android via adb, our
 # initramfs via telnet, Ubuntu via ssh, either via USB serial), runs
 # `fastboot boot`, then waits for
-# 172.16.42.1 to answer. Exit 0 = up, 1 = Android came back, 2 = timeout.
+# 172.16.43.1 to answer. Exit 0 = up, 1 = Android came back, 2 = timeout.
 # Nothing is flashed.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 IMG="$1"; TIMEOUT="${2:-120}"
-PHONE=172.16.42.1
+PHONE=172.16.43.1
 KEY=build/ssh/pixel5_ed25519
 SSH=(ssh -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 -o LogLevel=ERROR)
 

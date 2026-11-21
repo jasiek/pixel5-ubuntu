@@ -12,7 +12,7 @@ import socket
 import sys
 import time
 
-HOST, PORT = "172.16.42.1", 23
+HOST, PORT = "172.16.43.1", 23
 IAC, DONT, DO, WONT, WILL, SB, SE = 255, 254, 253, 252, 251, 250, 240
 MARK = "__PIXEL5_DONE__"
 
