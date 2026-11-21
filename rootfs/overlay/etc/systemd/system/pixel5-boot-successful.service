@@ -3,14 +3,20 @@
 # does). Without it every boot counts the slot's retry counter down, and after
 # a few boots the bootloader refuses it: "slot unbootable: load error".
 # Runs once SSH is up, i.e. the phone is reachable and can be fixed remotely.
+# Retries: on one boot (Test 212) it ran while the UFS LUN holding hyp_b
+# was still being scanned ("Failed to resolve path for hyp_b").
 [Unit]
 Description=Mark the current A/B boot slot successful
 After=ssh.service NetworkManager.service
 ConditionPathExists=/usr/local/sbin/qbootctl
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/qbootctl -m
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
