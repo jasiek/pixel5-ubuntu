@@ -1,7 +1,7 @@
 # Pixel 2 (walleye) → Pixel 5 (redfin): transfer inventory
 
-Source: `/Users/jps/github/ubuntu-touch-pixel2` (read-only; 208 commits, 122 tracked files outside `external/` and `LICENSES/`, about 8,300 lines).
-Target: `/Users/jps/github/pixel5-ubuntu`.
+Source: `../ubuntu-touch-pixel2` (sibling clone) (read-only; 208 commits, 122 tracked files outside `external/` and `LICENSES/`, about 8,300 lines).
+Target: this repository.
 Scope: local analysis of the Pixel 2 repo only. Items marked **[verify P5]** are assumptions about the Pixel 5 that the hardware, kernel and boot-chain research agents need to confirm. I did no web research for them.
 
 Legend: **R** = reuse as-is (at most a `pixel2`→`pixel5` rename), **A** = adapt (the logic carries over; walleye values are baked in), **D** = drop (MSM8998, walleye or 4.4-only).
