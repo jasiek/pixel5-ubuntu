@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P6.4 suspend: s2idle 47 mA (QG FIFO, Tests 204/206), AOSS 0; display CX hold fixed (patch 0013, Test 205, module only, not in a flashed image). Next: stop the DSPs/modem before suspend to test firmware-side holders. Release `ga7e4b32f250b` on boot_b (Test 197). Open owner items: P7.2 gate, nairo licence.
+## ▶ RESUME HERE: P6.4 suspend: s2idle 47 mA (QG FIFO, Tests 204/206), AOSS 0; display CX hold fixed (patch 0013, Test 205, module only, not in a flashed image). Ruled out since: DSPs stopped (54 mA, Test 207), touch/wifi LDOs (Test 208), qphy sleep vote (Test 209, breaks UFS), XO clock votes (Test 210). Next: no Linux-side holder left to try; decide with the owner whether 47 mA is accepted for now. Release `ga7e4b32f250b` on boot_b (Test 197). Open owner items: P7.2 gate, nairo licence.
 
 ---
 
