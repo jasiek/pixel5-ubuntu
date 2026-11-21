@@ -80,3 +80,5 @@ local 0004-LOCAL-drm-panel-add-the-Samsung-S6E3HC2-DSC-command-.patch
 local 0005-LOCAL-Input-s6sy761-add-an-SPI-transport.patch
 # P6.4 audio: TDM back ends to the CS35L41 amps and the RT5514
 local 0006-LOCAL-ASoC-qcom-sm8250-add-TDM-back-ends-for-the-Pixel-5.patch
+local 0007-LOCAL-ASoC-qcom-q6afe-pass-TDM-data-out-invert-sync-and-data-delay.patch
+local 0008-LOCAL-ASoC-qcom-q6routing-accept-S32_LE-back-ends.patch

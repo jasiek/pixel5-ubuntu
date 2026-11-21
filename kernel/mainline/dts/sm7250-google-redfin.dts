@@ -1691,7 +1691,7 @@
 		/*
 		 * RT5514 (lito-redbull-audio: reset GPIO 91 high; its DMICs
 		 * are powered by "Audio LDO Mic1/2", PM7250B GPIO 6 and
-		 * PM8150L GPIO 6, see the hogs). Its own DSP (hotword, over
+		 * PM8150L GPIO 6, see vreg_mic_ldo1/2). Its own DSP (hotword, over
 		 * SPI on QUP0 SE4) is not used.
 		 */
 		rt5514: audio-codec@57 {
@@ -1978,20 +1978,20 @@
 };
 
 &pm7250b_gpios {
+	/* downstream audio_ldo1: power source VIN1 */
+	mic_ldo1_default: mic-ldo1-default-state {
+		pins = "gpio6";
+		function = "normal";
+		power-source = <1>;
+		output-high;
+	};
+
 	spk_r_irq_default: spk-r-irq-default-state {
 		pins = "gpio8";
 		function = "normal";
 		input-enable;
 		bias-pull-down;
 		power-source = <1>;
-	};
-
-	/* "Audio LDO Mic1" (downstream audio_ldo1-gpios): DMIC power */
-	mic-ldo1-hog {
-		gpio-hog;
-		gpios = <6 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "mic-ldo1";
 	};
 
 	/* Live DT disp_pins_default (output-low dropped: the driver owns it) */
@@ -2015,19 +2015,17 @@
 };
 
 &pm8150l_gpios {
+	mic_ldo2_default: mic-ldo2-default-state {
+		pins = "gpio6";
+		function = "normal";
+		output-high;
+	};
+
 	spk_l_irq_default: spk-l-irq-default-state {
 		pins = "gpio3";
 		function = "normal";
 		input-enable;
 		bias-pull-down;
-	};
-
-	/* "Audio LDO Mic2" (downstream audio_ldo2-gpios): DMIC power */
-	mic-ldo2-hog {
-		gpio-hog;
-		gpios = <6 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "mic-ldo2";
 	};
 };
 
@@ -2040,6 +2038,16 @@
 &q6afedai {
 	dai@25 {
 		reg = <PRIMARY_TDM_TX_0>;
+		qcom,tdm-sync-mode = <0>;
+		qcom,tdm-sync-src = <1>;
+		qcom,tdm-data-out = <0>;
+		qcom,tdm-invert-sync = <0>;
+		qcom,tdm-data-delay = <1>;
+		qcom,tdm-data-align = <0>;
+	};
+
+	dai@89 {
+		reg = <QUINARY_TDM_TX_0>;
 		qcom,tdm-sync-mode = <0>;
 		qcom,tdm-sync-src = <1>;
 		qcom,tdm-data-out = <0>;
@@ -2073,6 +2081,35 @@
 };
 
 / {
+	/*
+	 * "Audio LDO Mic1/Mic2" (downstream audio_ldo1/2-gpios): DMIC power,
+	 * on whenever the board is up. Not gpio-hogs: this kernel's generic
+	 * hog code takes the DT cell as the line offset without the chip's
+	 * of_xlate, so on the SPMI GPIO blocks (numbered from 1) a hog lands
+	 * on the next pin (Test 150: GPIO 7 driven high, GPIO 6 untouched).
+	 */
+	vreg_mic_ldo1: regulator-mic-ldo1 {
+		compatible = "regulator-fixed";
+		regulator-name = "mic_ldo1";
+		gpio = <&pm7250b_gpios 6 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		pinctrl-names = "default";
+		pinctrl-0 = <&mic_ldo1_default>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	vreg_mic_ldo2: regulator-mic-ldo2 {
+		compatible = "regulator-fixed";
+		regulator-name = "mic_ldo2";
+		gpio = <&pm8150l_gpios 6 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		pinctrl-names = "default";
+		pinctrl-0 = <&mic_ldo2_default>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
 	sound {
 		compatible = "google,redfin-sndcard";
 		model = "Google Pixel 5";
@@ -2101,6 +2138,23 @@
 
 			cpu {
 				sound-dai = <&q6afedai QUINARY_TDM_RX_0>;
+			};
+
+			codec {
+				sound-dai = <&speaker_l 0>, <&speaker_r 0>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+		};
+
+		/* amp voltage/current sense (downstream QUIN_TDM_TX_0) */
+		amp-sense-dai-link {
+			link-name = "Amp Sense Capture";
+
+			cpu {
+				sound-dai = <&q6afedai QUINARY_TDM_TX_0>;
 			};
 
 			codec {

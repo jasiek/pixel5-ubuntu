@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Sat, 21 Nov 2026 02:00:00 +0000
+Subject: [PATCH 1/2] LOCAL: ASoC: qcom: q6afe: pass TDM data-out, invert-sync
+ and data-delay to the DSP
+
+The q6afe DAI nodes take qcom,tdm-data-out, qcom,tdm-invert-sync and
+qcom,tdm-data-delay, and q6afe-dai reads them, but they never reach the
+AFE: q6afe_tdm_port_prepare() leaves ctrl_data_out_enable,
+ctrl_invert_sync_pulse and ctrl_sync_data_delay of AFE_PARAM_ID_TDM_CONFIG
+at zero. A board that needs one bit of data delay (DSP_A framing, as the
+Google Pixel 5) then gets none.
+
+Carry the three values through q6afe_tdm_cfg into the port config.
+---
+ sound/soc/qcom/qdsp6/q6afe-dai.c | 3 +++
+ sound/soc/qcom/qdsp6/q6afe.c     | 3 +++
+ sound/soc/qcom/qdsp6/q6afe.h     | 3 +++
+ 3 files changed, 9 insertions(+)
+
+diff --git a/sound/soc/qcom/qdsp6/q6afe-dai.c b/sound/soc/qcom/qdsp6/q6afe-dai.c
+index 9203456..bafa174 100644
+--- a/sound/soc/qcom/qdsp6/q6afe-dai.c
++++ b/sound/soc/qcom/qdsp6/q6afe-dai.c
+@@ -278,6 +278,9 @@ static int q6tdm_hw_params(struct snd_pcm_substream *substream,
+ 	tdm->data_align_type = dai_data->priv[dai->id].data_align;
+ 	tdm->sync_src = dai_data->priv[dai->id].sync_src;
+ 	tdm->sync_mode = dai_data->priv[dai->id].sync_mode;
++	tdm->data_out_enable = dai_data->priv[dai->id].data_out_enable;
++	tdm->invert_sync = dai_data->priv[dai->id].invert_sync;
++	tdm->data_delay = dai_data->priv[dai->id].data_delay;
+ 
+ 	return 0;
+ }
+diff --git a/sound/soc/qcom/qdsp6/q6afe.c b/sound/soc/qcom/qdsp6/q6afe.c
+index f0ff135..528f362 100644
+--- a/sound/soc/qcom/qdsp6/q6afe.c
++++ b/sound/soc/qcom/qdsp6/q6afe.c
+@@ -1404,6 +1404,9 @@ void q6afe_tdm_port_prepare(struct q6afe_port *port,
+ 	pcfg->tdm_cfg.sync_mode = cfg->sync_mode;
+ 	pcfg->tdm_cfg.sync_src = cfg->sync_src;
+ 	pcfg->tdm_cfg.nslots_per_frame = cfg->nslots_per_frame;
++	pcfg->tdm_cfg.ctrl_data_out_enable = cfg->data_out_enable;
++	pcfg->tdm_cfg.ctrl_invert_sync_pulse = cfg->invert_sync;
++	pcfg->tdm_cfg.ctrl_sync_data_delay = cfg->data_delay;
+ 
+ 	pcfg->tdm_cfg.slot_width = cfg->slot_width;
+ 	pcfg->tdm_cfg.slot_mask = cfg->slot_mask;
+diff --git a/sound/soc/qcom/qdsp6/q6afe.h b/sound/soc/qcom/qdsp6/q6afe.h
+index 0b8c3ec..f6cdf7f 100644
+--- a/sound/soc/qcom/qdsp6/q6afe.h
++++ b/sound/soc/qcom/qdsp6/q6afe.h
+@@ -194,6 +194,9 @@ struct q6afe_tdm_cfg {
+ 	u16	slot_mask;
+ 	u32	data_align_type;
+ 	u16	ch_mapping[AFE_MAX_CHAN_COUNT];
++	u16	data_out_enable;
++	u16	invert_sync;
++	u16	data_delay;
+ };
+ 
+ struct q6afe_cdc_dma_cfg {
+-- 
+2.50.1 (Apple Git-155)
+

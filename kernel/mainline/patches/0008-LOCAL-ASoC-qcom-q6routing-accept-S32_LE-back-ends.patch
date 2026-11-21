@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Sat, 21 Nov 2026 02:10:00 +0000
+Subject: [PATCH 2/2] LOCAL: ASoC: qcom: q6routing: accept S32_LE back ends
+
+msm_routing_hw_params() records the bit width of S16_LE and S24_LE back
+ends only. For an S32_LE back end bits_per_sample stays 0, so the ADM
+device open asks the DSP for a 0-bit COPP and fails ("cmd = 0x10326
+return error = 0x1"), and playback through it is impossible.
+
+Record 32 bits for S32_LE. The Google Pixel 5 needs it for its speaker
+amplifiers, which take full 32-bit TDM slots.
+---
+ sound/soc/qcom/qdsp6/q6routing.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/sound/soc/qcom/qdsp6/q6routing.c b/sound/soc/qcom/qdsp6/q6routing.c
+index ea51120..30e57b9 100644
+--- a/sound/soc/qcom/qdsp6/q6routing.c
++++ b/sound/soc/qcom/qdsp6/q6routing.c
+@@ -1170,6 +1170,9 @@ static int routing_hw_params(struct snd_soc_component *component,
+ 	case SNDRV_PCM_FORMAT_S24_LE:
+ 			session->bits_per_sample = 24;
+ 		break;
++	case SNDRV_PCM_FORMAT_S32_LE:
++			session->bits_per_sample = 32;
++		break;
+ 	default:
+ 		break;
+ 	}
+-- 
+2.50.1 (Apple Git-155)
+
