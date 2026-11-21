@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P6.4 suspend: all DSPs sleep now (patches 0011-0012, Tests 184-192); next a cable-out s2idle test (owner unplugs) for AOSS sleep, then display/GPU. Open owner items: P7.2 gate (someone else installs from the README), nairo licence.
+## ▶ RESUME HERE: P6.4 suspend: all DSPs sleep (patches 0011-0012), AOSS sleep still 0 with the cable out (Tests 194-196). Next: the clock whose switch-off hangs boot (Test 195). Release `ga7e4b32f250b` (0011+0012) tested, not flashed. Open owner items: P7.2 gate, nairo licence.
 
 ---
 
@@ -127,7 +127,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
   - [x] Bluetooth (hci_qca) _Done 2026-11-20 (Test 99): WCN3991 on QUP0 SE5, vendor firmware, NVM deep-sleep byte patched at boot (else wedges after idle and crashes WLAN), machine-id BD address._
   - [x] Haptics (DRV2624: new driver) _Done 2026-11-20 (Test 100): local patch 0002 (FF_RUMBLE, RTP), pixel5-alive buzzes on mainline. Owner confirmed (2 buzzes)._
   - [x] Sensors (ADSP SEE) _Done 2026-11-20 (Tests 114–134): ADSP via PAS + FastRPC node + smp2p `sleepstate` entries (without them Google's CHRE fatals every 10 s); hexagonrpcd + our write/large-buffer patches serves a writable copy of persist's registry; `pixel5-see` reads accel, gyro, mag, pressure, light from Linux. CDSP: TZ refuses it (-22), parked._
-  - [ ] Suspend (s2idle) _Partly (Tests 101–131, 178–192): suspends and resumes cleanly. Every DSP now sleeps: the CDSP starts with the compute NoC vote (patch 0011, Test 184), the ADSP sleeps once q6afe keeps its LPASS core vote handle (patch 0012, Test 192). The SoC still never reached AOSS sleep (`aosd` 0) in every test so far, also with BT and USB off (Test 185, before 0012) and under the downstream kernel (Test 182). Next: a cable-out s2idle with 0012 in place; then display/GPU (boot with them disabled; runtime unbind hangs, Test 186)._
+  - [ ] Suspend (s2idle) _Partly (Tests 101–131, 178–192): suspends and resumes cleanly. Every DSP now sleeps: the CDSP starts with the compute NoC vote (patch 0011, Test 184), the ADSP sleeps once q6afe keeps its LPASS core vote handle (patch 0012, Test 192). The SoC still never reached AOSS sleep (`aosd` 0) in every test so far, also with BT and USB off (Test 185, before 0012) and under the downstream kernel (Test 182). Cable-out s2idle with 0012: still 0 (Test 194), also without `pd_ignore_unused` (Test 196); without `clk_ignore_unused` the kernel hangs at boot (Test 195). Next: find the clock behind that hang, then retry; UFS; display/GPU disabled at boot._
 - [x] **P6.5** (owner OK) Flash mainline as default on the active slot; downstream stays on the other. _Done 2026-11-20: mainline on boot_b (slot a is factory-unbootable, so downstream is a backup image instead: build/backup/boot_b-downstream-2026-11-20.img). SSH 28 s after power-on._
 
 ## Phase 7: One-command build + guided flashing (half a day; copy Pixel 2 P9)
