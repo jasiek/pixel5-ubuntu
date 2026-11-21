@@ -1004,7 +1004,9 @@
 		 * RT5514 DSP SPI port (downstream lito-qupv3 qupv3_se4_spi +
 		 * lito-redbull-audio mnh-spi@0: SPI 605, pins 29-32 function
 		 * qup04, drive 6; mode 3, 20 MHz on the RT5514P, 10 MHz here).
-		 * Used only to load the DSP firmware, see &rt5514.
+		 * Used to load the DSP firmware, see &rt5514. Receive-only
+		 * transfers return zeros on this GPI DMA path (Test 171):
+		 * rt5514-spi reads full-duplex (local patch 0009).
 		 */
 		spi4: spi@890000 {
 			compatible = "qcom,geni-spi";
@@ -1021,8 +1023,6 @@
 			dma-names = "tx", "rx";
 			#address-cells = <1>;
 			#size-cells = <0>;
-			/* Bring-up only, with patches/wip/0009 (Test 167) */
-			status = "disabled";
 
 			/*
 			 * No IRQ (TLMM 65, hotword events) for now. TLMM 66 is
@@ -1759,8 +1759,7 @@
 		 * are powered by "Audio LDO Mic1/2", PM7250B GPIO 6 and
 		 * PM8150L GPIO 6, see vreg_mic_ldo1/2). On this RT5514P the I2S
 		 * stream comes from its DSP; its firmware is loaded over SPI
-		 * (&spi4) by "DSP I2S Capture Switch" (WIP patch 0009; SPI reads
-		 * return zeros so far, Test 167).
+		 * (&spi4) by "DSP I2S Capture Switch" (local patch 0010, Test 172).
 		 */
 		rt5514: audio-codec@57 {
 			compatible = "realtek,rt5514";

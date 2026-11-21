@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
-# Speaker routes and a safe volume on the mainline sound card.
+# Speaker routes, a safe volume and the microphones on the mainline sound card.
 [Unit]
 Description=Pixel 5 mixer defaults (mainline)
 ConditionKernelVersion=>=6
-After=sound.target
+After=sound.target pixel5-firmware.service
 
 [Service]
 Type=oneshot

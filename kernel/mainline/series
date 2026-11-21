@@ -82,3 +82,5 @@ local 0005-LOCAL-Input-s6sy761-add-an-SPI-transport.patch
 local 0006-LOCAL-ASoC-qcom-sm8250-add-TDM-back-ends-for-the-Pixel-5.patch
 local 0007-LOCAL-ASoC-qcom-q6afe-pass-TDM-data-out-invert-sync-and-data-delay.patch
 local 0008-LOCAL-ASoC-qcom-q6routing-accept-S32_LE-back-ends.patch
+local 0009-LOCAL-ASoC-rt5514-spi-full-duplex-burst-reads-report-errors.patch
+local 0010-LOCAL-ASoC-rt5514-capture-through-the-RT5514P-DSP.patch
