@@ -21,17 +21,17 @@ DSP and selects DSP_FUNC WOV_I2S_SENSOR for each recording. This adds:
   0/-errno (it returned true/false) and keeps its command off the stack
   (GPI DMA).
 
-Status (Tests 166-167): SPI transfers complete (GPI DMA), but every SPI
+Status: works (Test 172): see docs/log.md Tests 166-172.
 read returns zeros, including the ID register (I2C: 10ec5514), in SPI
 modes 0-3, at 1 and 10 MHz, with RT5514 GPIO5 (the AP/CHRE SPI switch)
 untouched, low or high. The firmware readback therefore fails and the
 DSP is not started. See docs/log.md.
 ---
 diff --git a/sound/soc/codecs/rt5514-spi.c b/sound/soc/codecs/rt5514-spi.c
-index bcc2ff28b..e1c6e61c3 100644
+index bcc2ff28b..ef0fe4502 100644
 --- a/sound/soc/codecs/rt5514-spi.c
 +++ b/sound/soc/codecs/rt5514-spi.c
-@@ -332,16 +332,53 @@ static const struct snd_soc_component_driver rt5514_spi_component = {
+@@ -332,15 +332,60 @@ static const struct snd_soc_component_driver rt5514_spi_component = {
   *
   * Returns true for success.
   */
@@ -69,61 +69,128 @@ index bcc2ff28b..e1c6e61c3 100644
 -	int status;
 -	u8 write_buf[8];
 +	int status = 0;
-+	u8 *write_buf;
++	u8 *tx, *rx, t;
  	unsigned int i, end, offset = 0;
  
  	struct spi_message message;
- 	struct spi_transfer x[3];
- 
+-	struct spi_transfer x[3];
++	struct spi_transfer x;
++
 +	if (!rt5514_spi)
 +		return -ENODEV;
 +	rt5514_spi_apply_overrides();
 +
-+	/* not on the stack: the controller may DMA from it */
-+	write_buf = kmalloc(8, GFP_KERNEL);
-+	if (!write_buf)
-+		return -ENOMEM;
-+
++	/*
++	 * One full-duplex transfer per chunk: command + address (5 bytes),
++	 * 4 dummy bytes, then the data. A separate receive-only transfer
++	 * returns zeros on the GENI SPI GPI DMA path (Pixel 5, Test 169).
++	 * Not on the stack: the controller DMAs from/to them.
++	 */
++	tx = kzalloc(RT5514_SPI_BUF_LEN + 9, GFP_KERNEL);
++	rx = kzalloc(RT5514_SPI_BUF_LEN + 9, GFP_KERNEL);
++	if (!tx || !rx) {
++		status = -ENOMEM;
++		goto out;
++	}
+ 
  	while (offset < len) {
  		if (offset + RT5514_SPI_BUF_LEN <= len)
- 			end = RT5514_SPI_BUF_LEN;
-@@ -372,7 +409,7 @@ int rt5514_spi_burst_read(unsigned int addr, u8 *rxbuf, size_t len)
- 		status = spi_sync(rt5514_spi, &message);
+@@ -348,56 +393,39 @@ int rt5514_spi_burst_read(unsigned int addr, u8 *rxbuf, size_t len)
+ 		else
+ 			end = len % RT5514_SPI_BUF_LEN;
  
+-		write_buf[0] = spi_cmd;
+-		write_buf[1] = ((addr + offset) & 0xff000000) >> 24;
+-		write_buf[2] = ((addr + offset) & 0x00ff0000) >> 16;
+-		write_buf[3] = ((addr + offset) & 0x0000ff00) >> 8;
+-		write_buf[4] = ((addr + offset) & 0x000000ff) >> 0;
++		tx[0] = spi_cmd;
++		tx[1] = ((addr + offset) & 0xff000000) >> 24;
++		tx[2] = ((addr + offset) & 0x00ff0000) >> 16;
++		tx[3] = ((addr + offset) & 0x0000ff00) >> 8;
++		tx[4] = ((addr + offset) & 0x000000ff) >> 0;
+ 
+ 		spi_message_init(&message);
+-		memset(x, 0, sizeof(x));
+-
+-		x[0].len = 5;
+-		x[0].tx_buf = write_buf;
+-		spi_message_add_tail(&x[0], &message);
+-
+-		x[1].len = 4;
+-		x[1].tx_buf = write_buf;
+-		spi_message_add_tail(&x[1], &message);
+-
+-		x[2].len = end;
+-		x[2].rx_buf = rxbuf + offset;
+-		spi_message_add_tail(&x[2], &message);
++		memset(&x, 0, sizeof(x));
++		x.len = 9 + end;
++		x.tx_buf = tx;
++		x.rx_buf = rx;
++		spi_message_add_tail(&x, &message);
+ 
+ 		status = spi_sync(rt5514_spi, &message);
+-
  		if (status)
 -			return false;
 +			goto out;
  
++		memcpy(rxbuf + offset, rx + 9, end);
  		offset += RT5514_SPI_BUF_LEN;
  	}
-@@ -397,7 +434,9 @@ int rt5514_spi_burst_read(unsigned int addr, u8 *rxbuf, size_t len)
- 		rxbuf[i + 7] = write_buf[0];
+ 
+-	for (i = 0; i < len; i += 8) {
+-		write_buf[0] = rxbuf[i + 0];
+-		write_buf[1] = rxbuf[i + 1];
+-		write_buf[2] = rxbuf[i + 2];
+-		write_buf[3] = rxbuf[i + 3];
+-		write_buf[4] = rxbuf[i + 4];
+-		write_buf[5] = rxbuf[i + 5];
+-		write_buf[6] = rxbuf[i + 6];
+-		write_buf[7] = rxbuf[i + 7];
+-
+-		rxbuf[i + 0] = write_buf[7];
+-		rxbuf[i + 1] = write_buf[6];
+-		rxbuf[i + 2] = write_buf[5];
+-		rxbuf[i + 3] = write_buf[4];
+-		rxbuf[i + 4] = write_buf[3];
+-		rxbuf[i + 5] = write_buf[2];
+-		rxbuf[i + 6] = write_buf[1];
+-		rxbuf[i + 7] = write_buf[0];
++	/* the device sends 8-byte groups most significant byte first */
++	for (i = 0; i + 8 <= len; i += 8) {
++		t = rxbuf[i + 0]; rxbuf[i + 0] = rxbuf[i + 7]; rxbuf[i + 7] = t;
++		t = rxbuf[i + 1]; rxbuf[i + 1] = rxbuf[i + 6]; rxbuf[i + 6] = t;
++		t = rxbuf[i + 2]; rxbuf[i + 2] = rxbuf[i + 5]; rxbuf[i + 5] = t;
++		t = rxbuf[i + 3]; rxbuf[i + 3] = rxbuf[i + 4]; rxbuf[i + 4] = t;
  	}
  
 -	return true;
 +out:
-+	kfree(write_buf);
++	kfree(tx);
++	kfree(rx);
 +	return status;
  }
  EXPORT_SYMBOL_GPL(rt5514_spi_burst_read);
  
-@@ -414,9 +453,13 @@ int rt5514_spi_burst_write(u32 addr, const u8 *txbuf, size_t len)
+@@ -414,9 +442,13 @@ int rt5514_spi_burst_write(u32 addr, const u8 *txbuf, size_t len)
  {
  	u8 spi_cmd = RT5514_SPI_CMD_BURST_WRITE;
  	u8 *write_buf;
 -	unsigned int i, end, offset = 0;
 +	unsigned int i, j, end, offset = 0;
 +	int ret = 0;
-+
-+	if (!rt5514_spi)
-+		return -ENODEV;
  
 -	write_buf = kmalloc(RT5514_SPI_BUF_LEN + 6, GFP_KERNEL);
++	if (!rt5514_spi)
++		return -ENODEV;
++
 +	write_buf = kzalloc(RT5514_SPI_BUF_LEN + 6, GFP_KERNEL);
  
  	if (write_buf == NULL)
  		return -ENOMEM;
-@@ -433,27 +476,25 @@ int rt5514_spi_burst_write(u32 addr, const u8 *txbuf, size_t len)
+@@ -433,27 +465,25 @@ int rt5514_spi_burst_write(u32 addr, const u8 *txbuf, size_t len)
  		write_buf[3] = ((addr + offset) & 0x0000ff00) >> 8;
  		write_buf[4] = ((addr + offset) & 0x000000ff) >> 0;
  
@@ -162,10 +229,27 @@ index bcc2ff28b..e1c6e61c3 100644
  EXPORT_SYMBOL_GPL(rt5514_spi_burst_write);
  
 diff --git a/sound/soc/codecs/rt5514.c b/sound/soc/codecs/rt5514.c
-index a33fbc9fb..059742b79 100644
+index a33fbc9fb..ac4f61bfc 100644
 --- a/sound/soc/codecs/rt5514.c
 +++ b/sound/soc/codecs/rt5514.c
-@@ -263,6 +263,11 @@ static bool rt5514_i2c_readable_register(struct device *dev,
+@@ -145,6 +145,16 @@ static void rt5514_enable_dsp_prepare(struct rt5514_priv *rt5514)
+ 
+ static bool rt5514_volatile_register(struct device *dev, unsigned int reg)
+ {
++	struct rt5514_priv *rt5514 = dev_get_drvdata(dev);
++
++	/*
++	 * Once the RT5514P DSP runs, its firmware writes the clock, PLL and
++	 * power registers too: read-modify-write must see the hardware, or
++	 * DAPM puts cached defaults over them (CLK_CTRL1 DMIC divider).
++	 */
++	if (rt5514 && rt5514->dsp_i2s)
++		return true;
++
+ 	switch (reg) {
+ 	case RT5514_VENDOR_ID1:
+ 	case RT5514_VENDOR_ID2:
+@@ -263,6 +273,11 @@ static bool rt5514_i2c_readable_register(struct device *dev,
  	case RT5514_DSP_MAPPING | RT5514_DSP_CTRL4:
  	case RT5514_DSP_MAPPING | RT5514_VENDOR_ID1:
  	case RT5514_DSP_MAPPING | RT5514_VENDOR_ID2:
@@ -177,7 +261,7 @@ index a33fbc9fb..059742b79 100644
  		return true;
  
  	default:
-@@ -283,6 +288,222 @@ static const DECLARE_TLV_DB_RANGE(bst_tlv,
+@@ -283,6 +298,222 @@ static const DECLARE_TLV_DB_RANGE(bst_tlv,
  
  static const DECLARE_TLV_DB_SCALE(adc_vol_tlv, -1725, 75, 0);
  
@@ -400,7 +484,7 @@ index a33fbc9fb..059742b79 100644
  static int rt5514_dsp_voice_wake_up_get(struct snd_kcontrol *kcontrol,
  		struct snd_ctl_elem_value *ucontrol)
  {
-@@ -433,6 +654,8 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
+@@ -433,6 +664,8 @@ static const struct snd_kcontrol_new rt5514_snd_controls[] = {
  		adc_vol_tlv),
  	SOC_SINGLE_EXT("DSP Voice Wake Up", SND_SOC_NOPM, 0, 1, 0,
  		rt5514_dsp_voice_wake_up_get, rt5514_dsp_voice_wake_up_put),
@@ -409,7 +493,7 @@ index a33fbc9fb..059742b79 100644
  };
  
  /* ADC Mixer*/
-@@ -756,6 +979,16 @@ static int rt5514_hw_params(struct snd_pcm_substream *substream,
+@@ -756,6 +989,26 @@ static int rt5514_hw_params(struct snd_pcm_substream *substream,
  	int pre_div, bclk_ms, frame_size;
  	unsigned int val_len = 0;
  
@@ -420,13 +504,23 @@ index a33fbc9fb..059742b79 100644
 +		rt5514p_dsp_filter_reset(rt5514);
 +		regmap_update_bits(rt5514->i2c_regmap, 0x18002010, 0x3,
 +				   params_width(params) == 24 ? 0x2 : 0x0);
++		{
++			unsigned int f = 0, c = 0;
++
++			regmap_read(rt5514->i2c_regmap, RT5514_DSP_FUNC, &f);
++			regmap_read(rt5514->i2c_regmap, 0x18002010, &c);
++			dev_info(component->dev,
++				 "DSP hw_params: %u Hz, %u bit, %u ch; func %u, 2010 %08x\n",
++				 params_rate(params), params_width(params),
++				 params_channels(params), f, c);
++		}
 +		return 0;
 +	}
 +
  	rt5514->lrck = params_rate(params);
  	pre_div = rl6231_get_clk_info(rt5514->sysclk, rt5514->lrck);
  	if (pre_div < 0) {
-@@ -1140,8 +1373,23 @@ static const u64 rt5514_selectable_formats =
+@@ -1140,12 +1393,66 @@ static const u64 rt5514_selectable_formats =
  	SND_SOC_POSSIBLE_DAIFMT_IB_NF	|
  	SND_SOC_POSSIBLE_DAIFMT_IB_IF;
  
@@ -444,12 +538,59 @@ index a33fbc9fb..059742b79 100644
 +	return 0;
 +}
 +
++/*
++ * While the RT5514P DSP produces the I2S stream, its firmware owns the
++ * interface format and clocks: downstream never calls these on that link.
++ */
++static bool rt5514_dsp_owns_aif(struct snd_soc_dai *dai)
++{
++	struct rt5514_priv *rt5514 =
++		snd_soc_component_get_drvdata(dai->component);
++
++	return rt5514->dsp_i2s;
++}
++
++static int rt5514_dsp_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
++{
++	return rt5514_dsp_owns_aif(dai) ? 0 : rt5514_set_dai_fmt(dai, fmt);
++}
++
++static int rt5514_dsp_set_sysclk(struct snd_soc_dai *dai, int clk_id,
++				 unsigned int freq, int dir)
++{
++	return rt5514_dsp_owns_aif(dai) ? 0 :
++		rt5514_set_dai_sysclk(dai, clk_id, freq, dir);
++}
++
++static int rt5514_dsp_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
++			      unsigned int freq_in, unsigned int freq_out)
++{
++	return rt5514_dsp_owns_aif(dai) ? 0 :
++		rt5514_set_dai_pll(dai, pll_id, source, freq_in, freq_out);
++}
++
++static int rt5514_dsp_set_tdm_slot(struct snd_soc_dai *dai,
++				   unsigned int tx_mask, unsigned int rx_mask,
++				   int slots, int slot_width)
++{
++	return rt5514_dsp_owns_aif(dai) ? 0 :
++		rt5514_set_tdm_slot(dai, tx_mask, rx_mask, slots, slot_width);
++}
++
  static const struct snd_soc_dai_ops rt5514_aif_dai_ops = {
  	.hw_params = rt5514_hw_params,
+-	.set_fmt = rt5514_set_dai_fmt,
+-	.set_sysclk = rt5514_set_dai_sysclk,
+-	.set_pll = rt5514_set_dai_pll,
+-	.set_tdm_slot = rt5514_set_tdm_slot,
 +	.hw_free = rt5514_hw_free,
- 	.set_fmt = rt5514_set_dai_fmt,
- 	.set_sysclk = rt5514_set_dai_sysclk,
- 	.set_pll = rt5514_set_dai_pll,
++	.set_fmt = rt5514_dsp_set_fmt,
++	.set_sysclk = rt5514_dsp_set_sysclk,
++	.set_pll = rt5514_dsp_set_pll,
++	.set_tdm_slot = rt5514_dsp_set_tdm_slot,
+ 	.auto_selectable_formats = &rt5514_selectable_formats,
+ 	.num_auto_selectable_formats = 1,
+ };
 diff --git a/sound/soc/codecs/rt5514.h b/sound/soc/codecs/rt5514.h
 index 75755599f..26ff128a3 100644
 --- a/sound/soc/codecs/rt5514.h
