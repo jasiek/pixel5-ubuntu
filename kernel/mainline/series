@@ -78,3 +78,5 @@ local 0002-LOCAL-Input-add-a-minimal-TI-DRV2624-haptics-driver.patch
 local 0004-LOCAL-drm-panel-add-the-Samsung-S6E3HC2-DSC-command-.patch
 # P6.4 touch: SPI transport for the S6SY761 driver (S6SY79x on QUP0 SE0)
 local 0005-LOCAL-Input-s6sy761-add-an-SPI-transport.patch
+# P6.4 audio: TDM back ends to the CS35L41 amps and the RT5514
+local 0006-LOCAL-ASoC-qcom-sm8250-add-TDM-back-ends-for-the-Pixel-5.patch

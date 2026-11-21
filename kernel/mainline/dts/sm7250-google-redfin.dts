@@ -20,6 +20,9 @@
 #include <dt-bindings/mailbox/qcom-ipcc.h>
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include <dt-bindings/soc/qcom,apr.h>
+#include <dt-bindings/sound/qcom,q6afe.h>
+#include <dt-bindings/sound/qcom,q6asm.h>
 #include "sm7250.dtsi"
 #include "pm8150.dtsi"
 #include "pm8150l.dtsi"
@@ -749,6 +752,110 @@
 					iommus = <&apps_smmu 0x1405 0x0>;
 					qcom,nsessions = <5>;
 				};
+			};
+
+			/*
+			 * Audio: the ADSP runs Elite with APR (live DT
+			 * qcom,msm-audio-apr; audio-ion SMMU stream 0x1401).
+			 * Services as nairo 0149 (sm7250.dtsi).
+			 */
+			apr {
+				compatible = "qcom,apr-v2";
+				qcom,glink-channels = "apr_audio_svc";
+				qcom,domain = <APR_DOMAIN_ADSP>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				service@3 {
+					reg = <APR_SVC_ADSP_CORE>;
+					compatible = "qcom,q6core";
+					qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+				};
+
+				q6afe: service@4 {
+					compatible = "qcom,q6afe";
+					reg = <APR_SVC_AFE>;
+					qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+
+					q6afedai: dais {
+						compatible = "qcom,q6afe-dais";
+						#address-cells = <1>;
+						#size-cells = <0>;
+						#sound-dai-cells = <1>;
+					};
+
+					q6afecc: clock-controller {
+						compatible = "qcom,q6afe-clocks";
+						#clock-cells = <2>;
+					};
+				};
+
+				q6asm: service@7 {
+					compatible = "qcom,q6asm";
+					reg = <APR_SVC_ASM>;
+					qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+
+					q6asmdai: dais {
+						compatible = "qcom,q6asm-dais";
+						#address-cells = <1>;
+						#size-cells = <0>;
+						#sound-dai-cells = <1>;
+						iommus = <&apps_smmu 0x1401 0x0>;
+					};
+				};
+
+				q6adm: service@8 {
+					compatible = "qcom,q6adm";
+					reg = <APR_SVC_ADM>;
+					qcom,protection-domain = "avs/audio", "msm/adsp/audio_pd";
+
+					q6routing: routing {
+						compatible = "qcom,q6adm-routing";
+						#sound-dai-cells = <0>;
+					};
+				};
+			};
+		};
+	};
+
+	/*
+	 * LPASS LPI TLMM (downstream lito-lpi: qcom,lpi-pinctrl at 0x33c0000,
+	 * slew 0x355a000). 15 pins laid out as SM6350's (nairo 0150). The
+	 * quinary TDM to the speaker amps uses LPI GPIOs 6-9 (downstream
+	 * lpi_i2s1_*, drive 16 mA in lito-redfin-audio).
+	 */
+	lpass_tlmm: pinctrl@33c0000 {
+		compatible = "qcom,sm6350-lpass-lpi-pinctrl";
+		reg = <0x0 0x033c0000 0x0 0x20000>,
+		      <0x0 0x03550000 0x0 0x10000>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-ranges = <&lpass_tlmm 0 0 15>;
+
+		clocks = <&q6afecc LPASS_HW_MACRO_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&q6afecc LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		clock-names = "core", "audio";
+
+		quin_tdm_active: quin-tdm-active-state {
+			clk-pins {
+				pins = "gpio6";
+				function = "i2s1_clk";
+				drive-strength = <16>;
+				bias-disable;
+			};
+
+			ws-pins {
+				pins = "gpio7";
+				function = "i2s1_ws";
+				drive-strength = <16>;
+				bias-disable;
+			};
+
+			data-pins {
+				pins = "gpio8", "gpio9";
+				function = "i2s1_data";
+				drive-strength = <16>;
+				bias-disable;
 			};
 		};
 	};
@@ -1562,6 +1669,40 @@
 	 * PAC193x monitors: only the haptics driver is described, and the
 	 * bus is never scanned.
 	 */
+	/*
+	 * Live DT i2c@984000 (QUP1 SE1, SPI 354, GPIOs 6/7 function qup11):
+	 * the RT5514 microphone DSP at 0x57 and the NFC controller at 0x08
+	 * (not described). Not scanned.
+	 */
+	i2c7: i2c@984000 {
+		compatible = "qcom,geni-i2c";
+		reg = <0x0 0x00984000 0x0 0x4000>;
+		clock-names = "se";
+		clocks = <&gcc GCC_QUPV3_WRAP1_S1_CLK>;
+		interrupts = <GIC_SPI 354 IRQ_TYPE_LEVEL_HIGH>;
+		power-domains = <&rpmhpd RPMHPD_CX>;
+		operating-points-v2 = <&qup_opp_table>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&qup_i2c7_default>;
+		clock-frequency = <400000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * RT5514 (lito-redbull-audio: reset GPIO 91 high; its DMICs
+		 * are powered by "Audio LDO Mic1/2", PM7250B GPIO 6 and
+		 * PM8150L GPIO 6, see the hogs). Its own DSP (hotword, over
+		 * SPI on QUP0 SE4) is not used.
+		 */
+		rt5514: audio-codec@57 {
+			compatible = "realtek,rt5514";
+			reg = <0x57>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&rt5514_reset_default>;
+			#sound-dai-cells = <1>;
+		};
+	};
+
 	i2c9: i2c@98c000 {
 		compatible = "qcom,geni-i2c";
 		reg = <0x0 0x0098c000 0x0 0x4000>;
@@ -1580,6 +1721,63 @@
 		 * Live DT drv2624@5a: NRST on PM7250B GPIO 1, LRA, open loop.
 		 * The ti,* tuning values are copied as they are.
 		 */
+		/*
+		 * Speaker amps (live DT cs35l41@40/41 + the PVT pinctrl of
+		 * lito-v2-redfin-evt-audio): left reset PM8150L GPIO 11,
+		 * right reset PM7250B GPIO 11 (the live reset-gpios of the
+		 * right amp, PM8150L GPIO 10, is a Pixel 4a 5G leftover). The
+		 * live IRQ of the left amp, PM7250B GPIO 5, is the panel
+		 * reset: no amp IRQs for now. Boost values as live. The
+		 * driver drives reset to 1 to run the amp: active high, as
+		 * downstream's flag 0 (Test 146: ACTIVE_LOW kept both in reset,
+		 * "Failed waiting for OTP_BOOT_DONE").
+		 */
+		speaker_l: audio-amplifier@40 {
+			compatible = "cirrus,cs35l41";
+			reg = <0x40>;
+			reset-gpios = <&pm8150l_gpios 11 GPIO_ACTIVE_HIGH>;
+			/*
+			 * Amp GPIO2 = push-pull active-high interrupt (downstream
+			 * gpio-config2 src-select 5); PVT pins per lito-v2-redfin-
+			 * evt-audio (the older base DT's PM7250B GPIO 5 is the
+			 * panel reset here).
+			 */
+			interrupts-extended = <&pm8150l_gpios 3 IRQ_TYPE_LEVEL_HIGH>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&spk_l_irq_default>;
+			cirrus,gpio2-src-select = <5>;
+			cirrus,gpio2-output-enable;
+			cirrus,boost-peak-milliamp = <3700>;
+			cirrus,boost-ind-nanohenry = <1000>;
+			cirrus,boost-cap-microfarad = <15>;
+			cirrus,asp-sdout-hiz = <3>;
+			sound-name-prefix = "L";
+			#sound-dai-cells = <1>;
+		};
+
+		speaker_r: audio-amplifier@41 {
+			compatible = "cirrus,cs35l41";
+			reg = <0x41>;
+			reset-gpios = <&pm7250b_gpios 11 GPIO_ACTIVE_HIGH>;
+			/*
+			 * Amp GPIO2 = push-pull active-high interrupt (downstream
+			 * gpio-config2 src-select 5); PVT pins per lito-v2-redfin-
+			 * evt-audio (the older base DT's PM7250B GPIO 5 is the
+			 * panel reset here).
+			 */
+			interrupts-extended = <&pm7250b_gpios 8 IRQ_TYPE_LEVEL_HIGH>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&spk_r_irq_default>;
+			cirrus,gpio2-src-select = <5>;
+			cirrus,gpio2-output-enable;
+			cirrus,boost-peak-milliamp = <3700>;
+			cirrus,boost-ind-nanohenry = <1000>;
+			cirrus,boost-cap-microfarad = <15>;
+			cirrus,asp-sdout-hiz = <3>;
+			sound-name-prefix = "R";
+			#sound-dai-cells = <1>;
+		};
+
 		haptics@5a {
 			compatible = "ti,drv2624";
 			reg = <0x5a>;
@@ -1639,6 +1837,37 @@
 	};
 
 	/* Live DT qupv3_se9_i2c_active */
+	/* Downstream qupv3_se7_i2c_active */
+	qup_i2c7_default: qup-i2c7-default-state {
+		pins = "gpio6", "gpio7";
+		function = "qup11";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	/* Downstream rt5514_reset: out of reset */
+	rt5514_reset_default: rt5514-reset-default-state {
+		pins = "gpio91";
+		function = "gpio";
+		drive-strength = <2>;
+		output-high;
+	};
+
+	/* Downstream pri_tdm_*_active (lito-redbull-audio): RT5514 TDM */
+	pri_tdm_active: pri-tdm-active-state {
+		pins = "gpio49", "gpio51", "gpio52";
+		function = "pri_mi2s";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	pri_tdm_ws_active: pri-tdm-ws-active-state {
+		pins = "gpio50";
+		function = "pri_mi2s_ws";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
 	qup_i2c9_default: qup-i2c9-default-state {
 		pins = "gpio46", "gpio47";
 		function = "qup13";
@@ -1749,6 +1978,22 @@
 };
 
 &pm7250b_gpios {
+	spk_r_irq_default: spk-r-irq-default-state {
+		pins = "gpio8";
+		function = "normal";
+		input-enable;
+		bias-pull-down;
+		power-source = <1>;
+	};
+
+	/* "Audio LDO Mic1" (downstream audio_ldo1-gpios): DMIC power */
+	mic-ldo1-hog {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "mic-ldo1";
+	};
+
 	/* Live DT disp_pins_default (output-low dropped: the driver owns it) */
 	panel_reset_default: panel-reset-default-state {
 		pins = "gpio5";
@@ -1766,5 +2011,121 @@
 		function = "mdp_vsync";
 		drive-strength = <2>;
 		bias-pull-down;
+	};
+};
+
+&pm8150l_gpios {
+	spk_l_irq_default: spk-l-irq-default-state {
+		pins = "gpio3";
+		function = "normal";
+		input-enable;
+		bias-pull-down;
+	};
+
+	/* "Audio LDO Mic2" (downstream audio_ldo2-gpios): DMIC power */
+	mic-ldo2-hog {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "mic-ldo2";
+	};
+};
+
+/*
+ * Sound (P6.4): speakers = two CS35L41 on quinary TDM RX 0, microphones
+ * = the RT5514 on primary TDM TX 0 (downstream lito-redbull-audio
+ * external-playback/capture-dai-link). Framing as the live DT
+ * msm-dai-tdm groups: short sync, internal sync source, data delay 1.
+ */
+&q6afedai {
+	dai@25 {
+		reg = <PRIMARY_TDM_TX_0>;
+		qcom,tdm-sync-mode = <0>;
+		qcom,tdm-sync-src = <1>;
+		qcom,tdm-data-out = <0>;
+		qcom,tdm-invert-sync = <0>;
+		qcom,tdm-data-delay = <1>;
+		qcom,tdm-data-align = <0>;
+	};
+
+	dai@88 {
+		reg = <QUINARY_TDM_RX_0>;
+		qcom,tdm-sync-mode = <0>;
+		qcom,tdm-sync-src = <1>;
+		qcom,tdm-data-out = <0>;
+		qcom,tdm-invert-sync = <0>;
+		qcom,tdm-data-delay = <1>;
+		qcom,tdm-data-align = <0>;
+	};
+};
+
+&q6asmdai {
+	/* one DSP session per direction (nairo 0156) */
+	dai@0 {
+		reg = <MSM_FRONTEND_DAI_MULTIMEDIA1>;
+		direction = <Q6ASM_DAI_RX>;
+	};
+
+	dai@1 {
+		reg = <MSM_FRONTEND_DAI_MULTIMEDIA2>;
+		direction = <Q6ASM_DAI_TX>;
+	};
+};
+
+/ {
+	sound {
+		compatible = "google,redfin-sndcard";
+		model = "Google Pixel 5";
+		pinctrl-names = "default";
+		pinctrl-0 = <&quin_tdm_active>, <&pri_tdm_active>,
+			    <&pri_tdm_ws_active>;
+
+		mm1-dai-link {
+			link-name = "MultiMedia1";
+
+			cpu {
+				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
+			};
+		};
+
+		mm2-dai-link {
+			link-name = "MultiMedia2";
+
+			cpu {
+				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>;
+			};
+		};
+
+		speaker-dai-link {
+			link-name = "Speaker Playback";
+
+			cpu {
+				sound-dai = <&q6afedai QUINARY_TDM_RX_0>;
+			};
+
+			codec {
+				sound-dai = <&speaker_l 0>, <&speaker_r 0>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+		};
+
+		mic-dai-link {
+			link-name = "Mic Capture";
+
+			cpu {
+				sound-dai = <&q6afedai PRIMARY_TDM_TX_0>;
+			};
+
+			codec {
+				sound-dai = <&rt5514 0>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+		};
 	};
 };

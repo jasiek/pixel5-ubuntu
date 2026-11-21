@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Speaker -> microphone loopback test for the Pixel 5 (P6.4 audio).
+
+    pixel5-audiotest tone OUT.wav [Hz] [dBFS] [s]   write a stereo S16 sine
+    pixel5-audiotest analyze IN.wav [Hz]            tone level per 100 ms
+    pixel5-audiotest loop [Hz] [dBFS] [s]           play + record + analyze
+
+`loop` plays on hw:0,0 (MultiMedia1 -> speakers) while recording from
+hw:0,1 (MultiMedia2 <- microphones); the mixer routes must be set first
+(see docs/log.md). Quiet by default: -30 dBFS for 2 s.
+"""
+import math
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import wave
+
+RATE = 48000
+
+
+def tone(path, hz=1000.0, dbfs=-30.0, secs=2.0, channels=2):
+    amp = 32767 * 10 ** (dbfs / 20)
+    n = int(RATE * secs)
+    fade = int(RATE * 0.05)
+    frames = bytearray()
+    for i in range(n):
+        g = min(1.0, i / fade, (n - 1 - i) / fade)
+        v = int(amp * g * math.sin(2 * math.pi * hz * i / RATE))
+        frames += struct.pack("<h", v) * channels
+    with wave.open(path, "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(bytes(frames))
+
+
+def goertzel_db(samples, hz, rate):
+    """Level of one frequency, dBFS (a full-scale sine reads 0)."""
+    n = len(samples)
+    k = 2 * math.cos(2 * math.pi * hz / rate)
+    s1 = s2 = 0.0
+    for x in samples:
+        s1, s2 = x + k * s1 - s2, s1
+    p = s1 * s1 + s2 * s2 - k * s1 * s2
+    amp = 2 * math.sqrt(max(p, 0.0)) / n
+    return 20 * math.log10(amp / 32768 + 1e-12)
+
+
+def analyze(path, hz=1000.0):
+    with wave.open(path, "rb") as w:
+        ch, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
+        raw = w.readframes(w.getnframes())
+    if width != 2:
+        sys.exit("analyze: S16 only")
+    data = struct.unpack("<%dh" % (len(raw) // 2), raw)
+    win = rate // 10
+    best = -999.0
+    print("file %s: %d ch, %d Hz, %.1f s" % (path, ch, rate, len(data) / ch / rate))
+    for c in range(ch):
+        x = data[c::ch]
+        line = []
+        for i in range(0, len(x) - win + 1, win):
+            seg = x[i:i + win]
+            t = goertzel_db(seg, hz, rate)
+            # reference: the same window at a nearby frequency
+            ref = goertzel_db(seg, hz * 1.37, rate)
+            line.append("%4.0f" % t)
+            best = max(best, t - ref)
+        print("ch%d tone dBFS per 100 ms: %s" % (c, " ".join(line)))
+    print("max tone-minus-reference: %.1f dB" % best)
+    return best
+
+
+def loop(hz=1000.0, dbfs=-30.0, secs=2.0):
+    with tempfile.TemporaryDirectory() as d:
+        out, rec = d + "/tone.wav", d + "/rec.wav"
+        tone(out, hz, dbfs, secs)
+        r = subprocess.Popen(["arecord", "-q", "-D", "hw:0,1", "-f", "S16_LE",
+                              "-r", str(RATE), "-c", "2", "-d", str(int(secs + 2)), rec])
+        time.sleep(0.5)
+        p = subprocess.run(["aplay", "-q", "-D", "hw:0,0", out])
+        r.wait()
+        print("aplay exit %d, arecord exit %d" % (p.returncode, r.returncode))
+        return analyze(rec, hz)
+
+
+def main(a):
+    if len(a) >= 2 and a[0] == "tone":
+        tone(a[1], *[float(v) for v in a[2:5]])
+    elif len(a) >= 2 and a[0] == "analyze":
+        analyze(a[1], *[float(v) for v in a[2:3]])
+    elif a and a[0] == "loop":
+        loop(*[float(v) for v in a[1:4]])
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

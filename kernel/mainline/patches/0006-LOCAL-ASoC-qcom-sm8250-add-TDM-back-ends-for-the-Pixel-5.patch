@@ -1,0 +1,214 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Sat, 21 Nov 2026 01:00:00 +0000
+Subject: [PATCH] LOCAL: ASoC: qcom: sm8250: add TDM back ends for the Pixel 5
+
+The Pixel 5 has no Qualcomm codec in use: its two CS35L41 speaker
+amplifiers sit on the quinary TDM interface and its RT5514 microphone
+DSP on the primary one. Configure TDM back ends as the downstream
+machine driver (kona.c) does: 8 slots of 32 bits at 48 kHz (12.288 MHz
+bit clock from the LPASS), S32_LE to the amps and S16_LE from the
+microphones, short frame sync with one bit of data delay (set in the
+q6afe DAI nodes). Codec i of a link takes slot i, so the left amp plays
+slot 0 and the right amp slot 1. The CS35L41 PLL runs from SCLK; the
+RT5514 system clock comes from BCLK through its PLL1.
+
+Add the "google,redfin-sndcard" compatible for it.
+---
+ sound/soc/qcom/sm8250.c | 136 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 136 insertions(+)
+
+diff --git a/sound/soc/qcom/sm8250.c b/sound/soc/qcom/sm8250.c
+index 5866f1f..18aa0de 100644
+--- a/sound/soc/qcom/sm8250.c
++++ b/sound/soc/qcom/sm8250.c
+@@ -4,6 +4,7 @@
+ #include <dt-bindings/sound/qcom,q6afe.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <sound/cs35l41.h>
+ #include <sound/soc.h>
+ #include <sound/soc-dapm.h>
+ #include <sound/pcm.h>
+@@ -12,12 +13,31 @@
+ #include <sound/jack.h>
+ #include <linux/input-event-codes.h>
+ #include "qdsp6/q6afe.h"
++#include "../codecs/rt5514.h"
+ #include "common.h"
+ #include "usb_offload_utils.h"
+ #include "sdw.h"
+ 
+ #define MI2S_BCLK_RATE		1536000
+ 
++/*
++ * TDM back ends (Google Pixel 5, as its downstream kona.c): 8 slots of
++ * 32 bits at 48 kHz. Codec i of a link takes slot i (left/right amp).
++ */
++#define TDM_SLOTS		8
++#define TDM_SLOT_WIDTH		32
++#define TDM_BCLK_RATE		(48000 * TDM_SLOTS * TDM_SLOT_WIDTH)
++#define RT5514_SYSCLK_RATE	(48000 * 512)
++
++static const unsigned int sm8250_tdm_slot_offset[TDM_SLOTS] = {
++	0, 4, 8, 12, 16, 20, 24, 28,
++};
++
++static bool sm8250_is_tdm(unsigned int id)
++{
++	return id >= PRIMARY_TDM_RX_0 && id <= QUINARY_TDM_TX_7;
++}
++
+ struct sm8250_snd_data {
+ 	bool stream_prepared[AFE_PORT_MAX];
+ 	struct snd_soc_card *card;
+@@ -63,9 +83,20 @@ static int sm8250_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+ 	struct snd_interval *channels = hw_param_interval(params,
+ 					SNDRV_PCM_HW_PARAM_CHANNELS);
+ 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
++	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+ 
+ 	rate->min = rate->max = 48000;
+ 	channels->min = channels->max = 2;
++
++	/* TDM: S32_LE to the amps, S16_LE from the microphones (downstream) */
++	if (sm8250_is_tdm(cpu_dai->id)) {
++		snd_mask_none(fmt);
++		snd_mask_set_format(fmt, (cpu_dai->id & 1) ?
++				    SNDRV_PCM_FORMAT_S16_LE :
++				    SNDRV_PCM_FORMAT_S32_LE);
++		return 0;
++	}
++
+ 	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
+ 
+ 	return 0;
+@@ -143,6 +174,109 @@ static int sm8250_snd_startup(struct snd_pcm_substream *substream)
+ 	return qcom_snd_sdw_startup(substream);
+ }
+ 
++static int sm8250_tdm_codec_setup(struct snd_soc_dai *codec_dai,
++				  int stream, unsigned int index,
++				  unsigned int mask)
++{
++	unsigned int slot = index;
++	int ret;
++
++	ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_CBC_CFC |
++				  SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_DSP_A);
++	if (ret && ret != -ENOTSUPP)
++		return ret;
++
++	if (strstr(codec_dai->name, "cs35l41")) {
++		/* SCLK is the PLL reference; one slot per amp */
++		ret = snd_soc_dai_set_sysclk(codec_dai, CS35L41_CLKID_SCLK,
++					     TDM_BCLK_RATE, SND_SOC_CLOCK_IN);
++		if (ret)
++			return ret;
++		ret = snd_soc_component_set_sysclk(codec_dai->component,
++						   CS35L41_CLKID_SCLK, 0,
++						   TDM_BCLK_RATE,
++						   SND_SOC_CLOCK_IN);
++		if (ret)
++			return ret;
++		if (stream == SNDRV_PCM_STREAM_PLAYBACK)
++			return snd_soc_dai_set_channel_map(codec_dai, 0, NULL,
++							   1, &slot);
++		return 0;
++	}
++
++	if (strstr(codec_dai->name, "rt5514")) {
++		/* system clock from BCLK through PLL1 */
++		ret = snd_soc_dai_set_pll(codec_dai, 0, RT5514_PLL1_S_BCLK,
++					  TDM_BCLK_RATE, RT5514_SYSCLK_RATE);
++		if (ret)
++			return ret;
++		ret = snd_soc_dai_set_sysclk(codec_dai, RT5514_SCLK_S_PLL1,
++					     RT5514_SYSCLK_RATE,
++					     SND_SOC_CLOCK_IN);
++		if (ret)
++			return ret;
++		/* as downstream: one TX slot mask bit, 8 x 32 */
++		return snd_soc_dai_set_tdm_slot(codec_dai, 1, 0, TDM_SLOTS,
++						TDM_SLOT_WIDTH);
++	}
++
++	return 0;
++}
++
++static int sm8250_snd_hw_params(struct snd_pcm_substream *substream,
++				struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
++	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
++	unsigned int channels = params_channels(params);
++	unsigned int mask = GENMASK(channels - 1, 0);
++	struct snd_soc_dai *codec_dai;
++	unsigned int clk_id;
++	int ret, i;
++
++	if (!sm8250_is_tdm(cpu_dai->id))
++		return 0;
++
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++		ret = snd_soc_dai_set_tdm_slot(cpu_dai, 0, mask, TDM_SLOTS,
++					       TDM_SLOT_WIDTH);
++		if (ret)
++			return ret;
++		ret = snd_soc_dai_set_channel_map(cpu_dai, 0, NULL, channels,
++						  sm8250_tdm_slot_offset);
++	} else {
++		ret = snd_soc_dai_set_tdm_slot(cpu_dai, mask, 0, TDM_SLOTS,
++					       TDM_SLOT_WIDTH);
++		if (ret)
++			return ret;
++		ret = snd_soc_dai_set_channel_map(cpu_dai, channels,
++						  sm8250_tdm_slot_offset,
++						  0, NULL);
++	}
++	if (ret)
++		return ret;
++
++	/* one bit clock per TDM interface (8 ports each, RX and TX) */
++	clk_id = Q6AFE_LPASS_CLK_ID_PRI_TDM_IBIT +
++		 2 * ((cpu_dai->id - PRIMARY_TDM_RX_0) / 16);
++	ret = snd_soc_dai_set_sysclk(cpu_dai, clk_id, TDM_BCLK_RATE,
++				     SND_SOC_CLOCK_OUT);
++	if (ret)
++		return ret;
++
++	for_each_rtd_codec_dais(rtd, i, codec_dai) {
++		ret = sm8250_tdm_codec_setup(codec_dai, substream->stream, i,
++					     mask);
++		if (ret) {
++			dev_err(rtd->dev, "%s: TDM setup failed: %d\n",
++				codec_dai->name, ret);
++			return ret;
++		}
++	}
++
++	return 0;
++}
++
+ static int sm8250_snd_prepare(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+@@ -163,6 +297,7 @@ static int sm8250_snd_hw_free(struct snd_pcm_substream *substream)
+ 
+ static const struct snd_soc_ops sm8250_be_ops = {
+ 	.startup = sm8250_snd_startup,
++	.hw_params = sm8250_snd_hw_params,
+ 	.shutdown = qcom_snd_sdw_shutdown,
+ 	.hw_free = sm8250_snd_hw_free,
+ 	.prepare = sm8250_snd_prepare,
+@@ -214,6 +349,7 @@ static int sm8250_platform_probe(struct platform_device *pdev)
+ 
+ static const struct of_device_id snd_sm8250_dt_match[] = {
+ 	{ .compatible = "fairphone,fp4-sndcard", .data = "sm7225" },
++	{ .compatible = "google,redfin-sndcard", .data = "sm7250" },
+ 	{ .compatible = "fairphone,fp5-sndcard", .data = "qcm6490" },
+ 	{ .compatible = "motorola,dubai-sndcard", .data = "sm7325" },
+ 	{ .compatible = "qcom,qrb2210-sndcard", .data = "qcm2290" },
+-- 
+2.50.1 (Apple Git-155)
+

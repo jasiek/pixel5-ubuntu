@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         unattended-upgrades \
         rmtfs tqftpserv qrtr-tools \
         bluez \
+        alsa-utils \
         libdrm-tests \
     && rm -rf /var/lib/apt/lists/*
 
