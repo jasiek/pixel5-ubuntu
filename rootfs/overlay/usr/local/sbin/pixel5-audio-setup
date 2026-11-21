@@ -38,5 +38,7 @@ amixer -q -c G5 cset name="DSP I2S Capture Switch" on 2>/dev/null ||
 set_ "Stereo1 DMIC Mux" DMIC1
 set_ "Sto1 ADC MIXL DMIC Switch" on
 set_ "Sto1 ADC MIXR DMIC Switch" on
+# +21.75 dB, as Android's voice recorder path ("voice-rec-mic"); 23 = 0 dB
+set_ "ADC1 Capture Volume" 52,52
 set_ "MultiMedia2 Mixer PRIMARY_TDM_TX_0" 1
 echo "microphones routed"
