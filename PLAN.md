@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: release build with patch 0013 (display CX hold) and the USB 172.16.43.1 initramfs (both only hand-installed or unflashed so far): `scripts/build-mainline-test.sh default`, tethered test, then flash boot_b with the owner's OK. Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Then the P7.2 gate. Open owner items: P7.2 gate, nairo licence.
+## ▶ RESUME HERE: P7.2 gate (someone else flashes a phone from the README). Release `gbbaf33e7babe` on boot_b (Test 212: patch 0013, USB 172.16.43.1). Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Open owner items: P7.2 gate, nairo licence.
 
 ---
 
