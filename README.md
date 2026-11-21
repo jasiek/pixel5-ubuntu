@@ -14,7 +14,7 @@ The Pixel 5 (redfin) boots straight into plain, headless Ubuntu 24.04 arm64 on a
 - microphone (`arecord -D hw:G5,1 -f S16_LE -r 48000 -c 2 -d 5 rec.wav`; through the RT5514 DSP, firmware from the vendor partition; mono)
 - sensors via the ADSP: accelerometer, gyroscope, magnetometer, barometer, light (`sudo pixel5-see read accel`)
 
-**Not yet:** headphones over USB-C, cameras, deep sleep (suspend works but saves little). Details: [`PLAN.md`](PLAN.md).
+**Not yet:** cameras, deep sleep (suspend works but saves little). **Not planned:** headphones over USB-C. Details: [`PLAN.md`](PLAN.md).
 
 ## Install
 
