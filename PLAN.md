@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P7.2 gate (someone else flashes a phone from the README). Release `geb76aa45a530` on boot_b (Test 250: Venus decoder and encoder; Test 212: patch 0013, USB 172.16.43.1). Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Video (Phase 8): decode works and is flashed; encode works and is flashed (P8.3, Tests 249-250: patches 0016/0017; power not measured). Open owner items: P7.2 gate, nairo licence.
+## ▶ RESUME HERE: P7.2 gate (someone else flashes a phone from the README). Release `geb76aa45a530` on boot_b (Test 250: Venus decoder and encoder; Test 212: patch 0013, USB 172.16.43.1). Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Video (Phase 8): decode works and is flashed; encode works and is flashed (P8.3, Tests 249-251: patches 0016/0017; 1080p at 154 fps for +0.89 W). Open owner items: P7.2 gate, nairo licence.
 
 ---
 
@@ -141,7 +141,7 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
 Research: `docs/research/video.md` (IRIS1 core, SM8150-style videocc, TZ PAS 9).
 - [x] **P8.1** Video clock controller (local patch 0014, `qcom,sm7250-videocc`): probes, GDSCs switch.
 - [x] **P8.2** Venus resources (local patch 0015) + DT nodes; TZ starts the firmware (PAS 9) and HFI init answers.
-- [ ] **P8.3** H.264 encode through V4L2 (`v4l2-ctl` or GStreamer `v4l2h264enc`), measured (fps, CPU, power).
+- [x] **P8.3** H.264 encode through V4L2 (`v4l2-ctl` or GStreamer `v4l2h264enc`), measured (fps, CPU, power).
   Blocked (Tests 214-220): the IRIS1 encoder runs VPSS on the CVP core
   (MVS1); without MVS1 the first frame never completes, with MVS1 the SoC
   hangs in `LOAD_RESOURCES`. Untested: downstream IRIS1 power-on writes
@@ -156,7 +156,8 @@ Research: `docs/research/video.md` (IRIS1 core, SM8150-style videocc, TZ PAS 9).
   local patches 0016 (SMMU page tables shared with the VM) and 0017 (venus
   non-pixel bank, PERSIST pool, CVP power), release `geb76aa45a530`, no helper
   module: 720p 199-219 fps, 1080p 151-154 fps, output identical to the PoC.
-  Flashed to boot_b (Test 250). Left: power not measured.
+  Flashed to boot_b (Test 250). *Power (Test 251): 1080p encode 1.17 W whole phone (+0.89 W over idle,
+  5.8 mJ/frame) vs x264 2.05 W (28.5 mJ/frame).*
 - [x] **P8.4** H.264 decode through V4L2 (`v4l2h264dec`): bit-exact, about 200-230 fps at
   1080p with a third of libavcodec's CPU time (Tests 221-223).
 
