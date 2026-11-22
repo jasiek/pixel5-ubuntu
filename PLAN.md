@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P7.2 gate (someone else flashes a phone from the README). Release `gbbaf33e7babe` on boot_b (Test 212: patch 0013, USB 172.16.43.1). Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Open owner items: P7.2 gate, nairo licence.
+## ▶ RESUME HERE: P7.2 gate (someone else flashes a phone from the README). Release `gbbaf33e7babe` on boot_b (Test 212: patch 0013, USB 172.16.43.1). Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Video (Phase 8): decode works on `g0045cc71298c` (tethered, not flashed); encode blocked on the CVP core (P8.3). Open owner items: P7.2 gate, nairo licence, flashing `g0045cc71298c`.
 
 ---
 
@@ -139,9 +139,16 @@ Source: `docs/research/mainline.md`. No mainline kernel has ever been shown boot
 
 ## Phase 8: Hardware video encoding (owner request 2026-11-21)
 Research: `docs/research/video.md` (IRIS1 core, SM8150-style videocc, TZ PAS 9).
-- [ ] **P8.1** Video clock controller (local patch 0014, `qcom,sm7250-videocc`): probes, GDSCs switch.
-- [ ] **P8.2** Venus resources (local patch 0015) + DT nodes; TZ starts the firmware (PAS 9) and HFI init answers.
+- [x] **P8.1** Video clock controller (local patch 0014, `qcom,sm7250-videocc`): probes, GDSCs switch.
+- [x] **P8.2** Venus resources (local patch 0015) + DT nodes; TZ starts the firmware (PAS 9) and HFI init answers.
 - [ ] **P8.3** H.264 encode through V4L2 (`v4l2-ctl` or GStreamer `v4l2h264enc`), measured (fps, CPU, power).
+  Blocked (Tests 214-220): the IRIS1 encoder runs VPSS on the CVP core
+  (MVS1); without MVS1 the first frame never completes, with MVS1 the SoC
+  hangs in `LOAD_RESOURCES`. Untested: downstream IRIS1 power-on writes
+  (`CGC_DIS`, `CLOCK_CONFIG`, `HFI_DSP_QTBL`/`UC_REGION`), the IRIS1 work
+  route property, `cvp_disable`-style HFI controls.
+- [x] **P8.4** H.264 decode through V4L2 (`v4l2h264dec`): bit-exact, about 200-230 fps at
+  1080p with a third of libavcodec's CPU time (Tests 221-223).
 
 ## Parked (research problems; pick up only on request)
 Cameras (no SM7250 CAMSS, no IMX363/IMX481 drivers), rear fingerprint (TrustZone), wireless charging (P9382), 5G NR and VoLTE (unproven anywhere), NFC (ST21NFC fit unverified), modem data/SMS on downstream (needs a SIM).
