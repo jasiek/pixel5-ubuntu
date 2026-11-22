@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+# Mainline kernel: bind the Venus video codec once its firmware is staged.
+# qcom-venus probes at about 2.5 s, before /run/pixel5-fw exists, fails to
+# load venus.mdt and is not retried (Test 213). Binding again after
+# pixel5-firmware.service loads the firmware (TZ PAS 9) and registers the
+# V4L2 decoder.
+[Unit]
+Description=Bind the Venus video codec (mainline)
+ConditionKernelVersion=>=6
+ConditionPathExists=/sys/bus/platform/devices/aa00000.video-codec
+Wants=pixel5-firmware.service
+After=pixel5-firmware.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'd=/sys/bus/platform/drivers/qcom-venus; [ -e $d/aa00000.video-codec ] || echo aa00000.video-codec > $d/bind'
+
+[Install]
+WantedBy=multi-user.target
