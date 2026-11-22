@@ -9,15 +9,24 @@ register layout and the ARM9 reset sequence, so it is driven like AR50
 lito-vidc.dtsi; cp_size is the start of its non-secure context bank
 pool. Besides the video clock controller's clocks the core needs
 GCC_VIDEO_AXI_CLK, which no other driver enables.
+
+The IRIS1 encoder runs its input pre-processing (VPSS) on the CVP core
+(MVS1): with only vcodec0 powered, the firmware starts VPSS on the first
+input frame and never finishes it. Downstream powers the CVP GDSC and
+clocks together with the codec core. Add a resource flag that powers
+vcodec1 whenever vcodec0 is powered, and give SM7250 the vcodec1 domain
+and clocks.
 ---
- drivers/media/platform/qcom/venus/core.c | 44 ++++++++++++++++++++++++
- 1 file changed, 44 insertions(+)
+ drivers/media/platform/qcom/venus/core.c      | 46 +++++++++++++++++++
+ drivers/media/platform/qcom/venus/core.h      |  5 ++
+ .../media/platform/qcom/venus/pm_helpers.c    |  6 +++
+ 3 files changed, 57 insertions(+)
 
 diff --git a/drivers/media/platform/qcom/venus/core.c b/drivers/media/platform/qcom/venus/core.c
-index 7087af320..bd0a6004e 100644
+index 7087af320..57c114faa 100644
 --- a/drivers/media/platform/qcom/venus/core.c
 +++ b/drivers/media/platform/qcom/venus/core.c
-@@ -1055,6 +1055,49 @@ static const struct venus_resources sc7180_res = {
+@@ -1055,6 +1055,51 @@ static const struct venus_resources sc7180_res = {
  	.enc_nodename = "video-encoder",
  };
  
@@ -43,12 +52,14 @@ index 7087af320..bd0a6004e 100644
 +	.clks = { "core", "iface", "bus", "gcc_axi" },
 +	.clks_num = 4,
 +	.vcodec0_clks = { "vcodec0_core", "vcodec0_bus" },
++	.vcodec1_clks = { "vcodec1_core", "vcodec1_bus" },
 +	.vcodec_clks_num = 2,
-+	.vcodec_pmdomains = (const char *[]) { "venus", "vcodec0" },
-+	.vcodec_pmdomains_num = 2,
++	.vcodec_pmdomains = (const char *[]) { "venus", "vcodec0", "vcodec1" },
++	.vcodec_pmdomains_num = 3,
 +	.opp_pmdomain = (const char *[]) { "cx" },
 +	.opp_pmdomain_num = 1,
 +	.vcodec_num = 1,
++	.vcodec1_with_vcodec0 = true,
 +	.hfi_version = HFI_VERSION_4XX,
 +	.vpu_version = VPU_VERSION_AR50,
 +	.vmem_id = VIDC_RESOURCE_NONE,
@@ -67,7 +78,7 @@ index 7087af320..bd0a6004e 100644
  #if (!IS_ENABLED(CONFIG_VIDEO_QCOM_IRIS))
  static const struct freq_tbl sm8250_freq_table[] = {
  	{ 0, 444000000 },
-@@ -1239,6 +1282,7 @@ static const struct of_device_id venus_dt_match[] = {
+@@ -1239,6 +1284,7 @@ static const struct of_device_id venus_dt_match[] = {
  	{ .compatible = "qcom,qcm2290-venus", .data = &qcm2290_res, },
  #endif
  	{ .compatible = "qcom,sc7180-venus", .data = &sc7180_res, },
@@ -75,3 +86,43 @@ index 7087af320..bd0a6004e 100644
  	{ .compatible = "qcom,sdm660-venus", .data = &sdm660_res, },
  	{ .compatible = "qcom,sdm845-venus", .data = &sdm845_res, },
  	{ .compatible = "qcom,sdm845-venus-v2", .data = &sdm845_res_v2, },
+diff --git a/drivers/media/platform/qcom/venus/core.h b/drivers/media/platform/qcom/venus/core.h
+index 93fa77f05..563e35791 100644
+--- a/drivers/media/platform/qcom/venus/core.h
++++ b/drivers/media/platform/qcom/venus/core.h
+@@ -99,6 +99,11 @@ struct venus_resources {
+ 	enum hfi_version hfi_version;
+ 	enum vpu_version vpu_version;
+ 	u8 num_vpp_pipes;
++	/*
++	 * IRIS1: the encoder's pre-processing (VPSS) runs on the CVP core
++	 * (vcodec1), so it is powered together with vcodec0.
++	 */
++	bool vcodec1_with_vcodec0;
+ 	u32 max_load;
+ 	unsigned int vmem_id;
+ 	u32 vmem_size;
+diff --git a/drivers/media/platform/qcom/venus/pm_helpers.c b/drivers/media/platform/qcom/venus/pm_helpers.c
+index e88e66be4..7a6bfcab8 100644
+--- a/drivers/media/platform/qcom/venus/pm_helpers.c
++++ b/drivers/media/platform/qcom/venus/pm_helpers.c
+@@ -593,6 +593,9 @@ static int poweroff_coreid(struct venus_core *core, unsigned int coreid_mask)
+ {
+ 	int ret;
+ 
++	if (core->res->vcodec1_with_vcodec0 && (coreid_mask & VIDC_CORE_ID_1))
++		coreid_mask |= VIDC_CORE_ID_2;
++
+ 	if (coreid_mask & VIDC_CORE_ID_1) {
+ 		ret = vcodec_control_v4(core, VIDC_CORE_ID_1, true);
+ 		if (ret)
+@@ -636,6 +639,9 @@ static int poweron_coreid(struct venus_core *core, unsigned int coreid_mask)
+ {
+ 	int ret;
+ 
++	if (core->res->vcodec1_with_vcodec0 && (coreid_mask & VIDC_CORE_ID_1))
++		coreid_mask |= VIDC_CORE_ID_2;
++
+ 	if (coreid_mask & VIDC_CORE_ID_1) {
+ 		ret = pm_runtime_get_sync(core->pmdomains->pd_devs[1]);
+ 		if (ret < 0)

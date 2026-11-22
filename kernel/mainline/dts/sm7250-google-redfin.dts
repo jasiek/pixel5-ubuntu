@@ -875,6 +875,19 @@
 		qcom,bcm-voters = <&apps_bcm_voter>;
 	};
 
+	/*
+	 * MMSS NoC: SM7250 has SM8250's video nodes (downstream lito-bus:
+	 * qxm_venus0/1/arm9 -> qns_mem_noc_sf, BCMs MM3/MM2). Base and size
+	 * from lito-bus (mmss_noc-base 0x1740000, 0x1c100); no QoS is
+	 * programmed. Only Venus votes on it; MM0 (display HF) is keepalive.
+	 */
+	mmss_noc: interconnect@1740000 {
+		compatible = "qcom,sm8250-mmss-noc";
+		reg = <0x0 0x01740000 0x0 0x1c100>;
+		#interconnect-cells = <2>;
+		qcom,bcm-voters = <&apps_bcm_voter>;
+	};
+
 	remoteproc_cdsp: remoteproc@8300000 {
 		compatible = "qcom,sm8250-cdsp-pas";
 		reg = <0x0 0x08300000 0x0 0x10000>;
@@ -1203,18 +1216,24 @@
 	/*
 	 * Venus (IRIS1, 2 pipes), from downstream lito-vidc.dtsi
 	 * (qcom,vidc0) and the PIL node venus@aae0000 (PAS 9, video_mem).
-	 * Non-secure context bank: SIDs 0x1380/0x60 and 0x1360. No
-	 * interconnects: no SM7250 MMSS/GEM NoC provider yet.
+	 * Non-secure context bank: SIDs 0x1380/0x60 and 0x1360.
+	 * Interconnects inside the MMSS NoC only (no SM7250 GEM/config NoC
+	 * provider yet): video-mem = downstream venus-ddr (VIDEO_P0), and
+	 * "cpu-cfg" carries downstream's arm9-ddr vote (VIDEO_PROC, the
+	 * same 1000 kbps venus puts on cpu-cfg); the real CPU -> VENUS_CFG
+	 * path needs the GEM and config NoCs.
 	 */
 	venus: video-codec@aa00000 {
 		compatible = "qcom,sm7250-venus";
 		reg = <0x0 0x0aa00000 0x0 0x100000>;
 		interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
 
+		/* mvs1 is the CVP core: the encoder's VPSS runs there */
 		power-domains = <&videocc MVSC_GDSC>,
 				<&videocc MVS0_GDSC>,
+				<&videocc MVS1_GDSC>,
 				<&rpmhpd RPMHPD_CX>;
-		power-domain-names = "venus", "vcodec0", "cx";
+		power-domain-names = "venus", "vcodec0", "vcodec1", "cx";
 		operating-points-v2 = <&venus_opp_table>;
 
 		clocks = <&videocc VIDEO_CC_MVSC_CORE_CLK>,
@@ -1222,9 +1241,16 @@
 			 <&videocc VIDEO_CC_MVSC_CTL_AXI_CLK>,
 			 <&gcc GCC_VIDEO_AXI_CLK>,
 			 <&videocc VIDEO_CC_MVS0_CORE_CLK>,
-			 <&videocc VIDEO_CC_MVS0_AXI_CLK>;
+			 <&videocc VIDEO_CC_MVS0_AXI_CLK>,
+			 <&videocc VIDEO_CC_MVS1_CORE_CLK>,
+			 <&videocc VIDEO_CC_MVS1_AXI_CLK>;
 		clock-names = "core", "iface", "bus", "gcc_axi",
-			      "vcodec0_core", "vcodec0_bus";
+			      "vcodec0_core", "vcodec0_bus",
+			      "vcodec1_core", "vcodec1_bus";
+
+		interconnects = <&mmss_noc MASTER_VIDEO_P0 0 &mmss_noc SLAVE_MNOC_SF_MEM_NOC 0>,
+				<&mmss_noc MASTER_VIDEO_PROC 0 &mmss_noc SLAVE_MNOC_SF_MEM_NOC 0>;
+		interconnect-names = "video-mem", "cpu-cfg";
 
 		iommus = <&apps_smmu 0x1380 0x60>,
 			 <&apps_smmu 0x1360 0x0>;
