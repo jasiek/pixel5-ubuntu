@@ -129,6 +129,17 @@
 			no-map;
 		};
 
+		/*
+		 * Venus secure non-pixel pool: handed to VM CP_NON_PIXEL (0xb)
+		 * at probe, so no-map. Encoder INTERNAL_PERSIST buffers come
+		 * from it (64 KiB per 720p session).
+		 */
+		venus_np_mem: venus-non-pixel {
+			size = <0x0 0x400000>;
+			alignment = <0x0 0x100000>;
+			no-map;
+		};
+
 		ramoops_meta_mem: ramoops-meta@b8641000 {
 			reg = <0x0 0xb8641000 0x0 0x1000>;
 			no-map;
@@ -1228,10 +1239,12 @@
 		reg = <0x0 0x0aa00000 0x0 0x100000>;
 		interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
 
+		/* mvs1 is the CVP core: the encoder's VPSS runs there */
 		power-domains = <&videocc MVSC_GDSC>,
 				<&videocc MVS0_GDSC>,
+				<&videocc MVS1_GDSC>,
 				<&rpmhpd RPMHPD_CX>;
-		power-domain-names = "venus", "vcodec0", "cx";
+		power-domain-names = "venus", "vcodec0", "vcodec1", "cx";
 		operating-points-v2 = <&venus_opp_table>;
 
 		clocks = <&videocc VIDEO_CC_MVSC_CORE_CLK>,
@@ -1239,9 +1252,12 @@
 			 <&videocc VIDEO_CC_MVSC_CTL_AXI_CLK>,
 			 <&gcc GCC_VIDEO_AXI_CLK>,
 			 <&videocc VIDEO_CC_MVS0_CORE_CLK>,
-			 <&videocc VIDEO_CC_MVS0_AXI_CLK>;
+			 <&videocc VIDEO_CC_MVS0_AXI_CLK>,
+			 <&videocc VIDEO_CC_MVS1_CORE_CLK>,
+			 <&videocc VIDEO_CC_MVS1_AXI_CLK>;
 		clock-names = "core", "iface", "bus", "gcc_axi",
-			      "vcodec0_core", "vcodec0_bus";
+			      "vcodec0_core", "vcodec0_bus",
+			      "vcodec1_core", "vcodec1_bus";
 
 		interconnects = <&mmss_noc MASTER_VIDEO_P0 0 &mmss_noc SLAVE_MNOC_SF_MEM_NOC 0>,
 				<&mmss_noc MASTER_VIDEO_PROC 0 &mmss_noc SLAVE_MNOC_SF_MEM_NOC 0>;
@@ -1255,10 +1271,20 @@
 			compatible = "venus-decoder";
 		};
 
+		video-encoder {
+			compatible = "venus-encoder";
+		};
+
 		/*
-		 * No encoder: the IRIS1 encoder needs the CVP core (MVS1)
-		 * for VPSS, which stalls or hangs the SoC (Tests 214-220).
+		 * Secure non-pixel stream (downstream venus_sec_non_pixel): the
+		 * encoder's CVP core reads INTERNAL_PERSIST through it. Its
+		 * page tables are shared with the VM (qcom,iommu-vmid).
 		 */
+		non-pixel {
+			iommus = <&apps_smmu 0x1304 0xe0>;
+			qcom,iommu-vmid = <0xb>;
+			memory-region = <&venus_np_mem>;
+		};
 
 		/* SKU 0 rates; CX corners from videocc-lito rate_max */
 		venus_opp_table: opp-table {

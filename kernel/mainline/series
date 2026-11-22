@@ -89,3 +89,5 @@ local 0012-LOCAL-ASoC-qcom-q6afe-keep-the-LPASS-core-HW-vote-handle.patch
 local 0013-LOCAL-drm-msm-dsi-phy-prepare-the-AHB-clock-only-while-resumed.patch
 local 0014-LOCAL-clk-qcom-add-the-SM7250-video-clock-controller.patch
 local 0015-LOCAL-media-venus-add-SM7250-resources.patch
+local 0016-LOCAL-iommu-arm-smmu-qcom-share-page-tables-with-a-master-s-VM.patch
+local 0017-LOCAL-media-venus-SM7250-encoder-CVP-core-secure-non-pixel-PERSIST.patch

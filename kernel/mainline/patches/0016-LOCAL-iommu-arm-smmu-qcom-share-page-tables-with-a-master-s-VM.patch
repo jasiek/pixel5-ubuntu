@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Sun, 22 Nov 2026 10:09:34 +0000
+Subject: [PATCH] LOCAL: iommu/arm-smmu-qcom: share page tables with a master's
+ VM
+
+The hypervisor only gives a context bank to a secure stream ID (the
+content-protection banks of the multimedia cores) if the VM it belongs to
+can read the bank's page tables. On SM7250 the Venus encoder's CVP core
+reads its INTERNAL_PERSIST buffer through the secure non-pixel stream
+(0x1384, VM CP_NON_PIXEL); with no working bank for it the SoC freezes at
+the first frame.
+
+A master whose DT node has "qcom,iommu-vmid" now gets custom io-pgtable
+allocators that share every page-table page with that VM (HLOS read-write,
+the VM read-only) for as long as it is in use, as the downstream
+arm_smmu_assign_table() does. The top-level table is allocated before the
+context bank is programmed, so the bank is accepted at attach.
+---
+ drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c | 67 ++++++++++++++++++++++
+ drivers/iommu/arm/arm-smmu/arm-smmu.h      |  1 +
+ 2 files changed, 68 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+index 5d5dcece3..a288aa45a 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -434,6 +434,66 @@ static const struct of_device_id qcom_smmu_client_of_match[] __maybe_unused = {
+ 	{ }
+ };
+ 
++/*
++ * A master whose DT node names a VM in "qcom,iommu-vmid" (the secure stream IDs
++ * of a multimedia core, e.g. Venus' secure non-pixel bank) only gets a working
++ * context bank from the hypervisor if that VM can read every page of its page
++ * tables. Share each table page with it while it is in use, as the downstream
++ * arm_smmu_assign_table() does.
++ */
++static void *qcom_smmu_vmid_pgtable_alloc(void *cookie, size_t size, gfp_t gfp)
++{
++	struct arm_smmu_domain *smmu_domain = cookie;
++	struct qcom_scm_vmperm perms[] = {
++		{ .vmid = QCOM_SCM_VMID_HLOS, .perm = QCOM_SCM_PERM_RW },
++		{ .vmid = smmu_domain->secure_vmid, .perm = QCOM_SCM_PERM_READ },
++	};
++	u64 src = BIT(QCOM_SCM_VMID_HLOS);
++	void *pages;
++	int ret;
++
++	/* the SCM call may sleep */
++	if (!gfpflags_allow_blocking(gfp))
++		return NULL;
++
++	size = PAGE_ALIGN(size);
++	pages = alloc_pages_exact(size, gfp | __GFP_ZERO);
++	if (!pages)
++		return NULL;
++
++	ret = qcom_scm_assign_mem(virt_to_phys(pages), size, &src, perms,
++				  ARRAY_SIZE(perms));
++	if (ret) {
++		dev_err(smmu_domain->smmu->dev,
++			"cannot share a page table with VM %u: %d\n",
++			smmu_domain->secure_vmid, ret);
++		free_pages_exact(pages, size);
++		return NULL;
++	}
++
++	return pages;
++}
++
++static void qcom_smmu_vmid_pgtable_free(void *cookie, void *pages, size_t size)
++{
++	struct arm_smmu_domain *smmu_domain = cookie;
++	struct qcom_scm_vmperm perm = {
++		.vmid = QCOM_SCM_VMID_HLOS, .perm = QCOM_SCM_PERM_RWX,
++	};
++	u64 src = BIT(QCOM_SCM_VMID_HLOS) | BIT(smmu_domain->secure_vmid);
++
++	size = PAGE_ALIGN(size);
++	if (qcom_scm_assign_mem(virt_to_phys(pages), size, &src, &perm, 1)) {
++		/* still shared with the other VM: never reuse it */
++		dev_err(smmu_domain->smmu->dev,
++			"leaking a page table shared with VM %u\n",
++			smmu_domain->secure_vmid);
++		return;
++	}
++
++	free_pages_exact(pages, size);
++}
++
+ static int qcom_smmu_init_context(struct arm_smmu_domain *smmu_domain,
+ 		struct io_pgtable_cfg *pgtbl_cfg, struct device *dev)
+ {
+@@ -441,9 +501,16 @@ static int qcom_smmu_init_context(struct arm_smmu_domain *smmu_domain,
+ 	struct qcom_smmu *qsmmu = to_qcom_smmu(smmu);
+ 	const struct of_device_id *client_match;
+ 	int cbndx = smmu_domain->cfg.cbndx;
++	u32 vmid;
+ 
+ 	smmu_domain->cfg.flush_walk_prefer_tlbiasid = true;
+ 
++	if (dev && !of_property_read_u32(dev->of_node, "qcom,iommu-vmid", &vmid)) {
++		smmu_domain->secure_vmid = vmid;
++		pgtbl_cfg->alloc = qcom_smmu_vmid_pgtable_alloc;
++		pgtbl_cfg->free = qcom_smmu_vmid_pgtable_free;
++	}
++
+ 	client_match = qsmmu->data->client_match;
+ 
+ 	if (client_match)
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.h b/drivers/iommu/arm/arm-smmu/arm-smmu.h
+index 26d2e33cd..c4afe2e42 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.h
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.h
+@@ -384,6 +384,7 @@ struct arm_smmu_domain {
+ 	enum arm_smmu_domain_stage	stage;
+ 	struct mutex			init_mutex; /* Protects smmu pointer */
+ 	spinlock_t			cb_lock; /* Serialises ATS1* ops and TLB syncs */
++	u32				secure_vmid; /* page tables shared with this VM */
+ 	struct iommu_domain		domain;
+ };
+ 

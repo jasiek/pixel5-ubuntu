@@ -1,0 +1,461 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pixel5 <pixel5@localhost>
+Date: Sun, 22 Nov 2026 10:11:32 +0000
+Subject: [PATCH] LOCAL: media: venus: SM7250 encoder (CVP core, secure
+ non-pixel PERSIST)
+
+The IRIS1 encoder pre-processes every input frame (VPSS) on the CVP core,
+vcodec1 (MVS1), so vcodec1 is now powered whenever vcodec0 is.
+
+The CVP core reads its register-program table from the session's
+INTERNAL_PERSIST buffer through the secure non-pixel stream ID (0x1384),
+even in a non-secure session: downstream always allocates an encoder's
+PERSIST buffer as CP_NON_PIXEL memory. With no context bank for that
+stream the SoC freezes at the first frame and resets.
+
+A "non-pixel" child node (iommus, qcom,iommu-vmid, memory-region) now gets
+its own platform device and IOMMU domain. Its no-map carveout is handed to
+the VM once and mapped once at an IOVA inside the content-protection
+non-pixel range; encoder PERSIST buffers are carved from it with a
+gen_pool. The context bank's page tables are shared with the VM by the
+SMMU driver (local patch 0016). Without the bank the encoder is not
+registered.
+
+Measured on redfin (Tests 235-248, proof of concept): 1080p H.264 at about
+150 fps with 1.2-1.4 s of CPU time for 300 frames.
+---
+ drivers/media/platform/qcom/venus/Kconfig     |   1 +
+ drivers/media/platform/qcom/venus/core.c      |  17 ++-
+ drivers/media/platform/qcom/venus/core.h      |  20 +++
+ drivers/media/platform/qcom/venus/firmware.c  | 133 ++++++++++++++++++
+ drivers/media/platform/qcom/venus/firmware.h  |   2 +
+ drivers/media/platform/qcom/venus/helpers.c   |  56 ++++++--
+ .../media/platform/qcom/venus/pm_helpers.c    |   6 +
+ drivers/media/platform/qcom/venus/venc.c      |   6 +
+ 8 files changed, 224 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/venus/Kconfig b/drivers/media/platform/qcom/venus/Kconfig
+index 7997b8aa4..b9ec4b92b 100644
+--- a/drivers/media/platform/qcom/venus/Kconfig
++++ b/drivers/media/platform/qcom/venus/Kconfig
+@@ -7,6 +7,7 @@ config VIDEO_QCOM_VENUS
+ 	select QCOM_MDT_LOADER
+ 	select QCOM_SCM
+ 	select QCOM_PAS
++	select GENERIC_ALLOCATOR
+ 	select VIDEOBUF2_DMA_CONTIG
+ 	select V4L2_MEM2MEM_DEV
+ 	help
+diff --git a/drivers/media/platform/qcom/venus/core.c b/drivers/media/platform/qcom/venus/core.c
+index 98981afc1..c50155a99 100644
+--- a/drivers/media/platform/qcom/venus/core.c
++++ b/drivers/media/platform/qcom/venus/core.c
+@@ -536,6 +536,8 @@ static int venus_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto err_core_deinit;
+ 
++	venus_secnp_init(core);
++
+ 	if (core->res->dec_nodename || core->res->enc_nodename) {
+ 		ret = venus_add_dynamic_nodes(core);
+ 		if (ret)
+@@ -569,6 +571,7 @@ static int venus_probe(struct platform_device *pdev)
+ err_remove_dynamic_nodes:
+ 	venus_remove_dynamic_nodes(core);
+ err_core_deinit:
++	venus_secnp_deinit(core);
+ 	hfi_core_deinit(core, false);
+ err_venus_shutdown:
+ 	venus_shutdown(core);
+@@ -606,6 +609,7 @@ static void venus_remove(struct platform_device *pdev)
+ 	venus_shutdown(core);
+ 	of_platform_depopulate(dev);
+ 
++	venus_secnp_deinit(core);
+ 	venus_firmware_deinit(core);
+ 
+ 	venus_remove_dynamic_nodes(core);
+@@ -1061,9 +1065,9 @@ static const struct venus_resources sc7180_res = {
+  * Values from the downstream lito-vidc.dtsi (SKU 0 clock rates, the
+  * non-secure context bank's address pool for cp_size).
+  *
+- * Decoder only: the IRIS1 encoder pre-processes every input frame (VPSS)
+- * on the CVP core (MVS1). Without MVS1 the first frame never completes;
+- * with MVS1 powered the SoC hangs while the firmware sets up the CVP DMA.
++ * The encoder pre-processes every input frame (VPSS) on the CVP core
++ * (vcodec1, MVS1), which reads the session's INTERNAL_PERSIST buffer through
++ * the secure non-pixel stream ID: see venus_secnp_init().
+  */
+ static const struct freq_tbl sm7250_freq_table[] = {
+ 	{ 0, 365000000 },
+@@ -1081,12 +1085,14 @@ static const struct venus_resources sm7250_res = {
+ 	.clks = { "core", "iface", "bus", "gcc_axi" },
+ 	.clks_num = 4,
+ 	.vcodec0_clks = { "vcodec0_core", "vcodec0_bus" },
++	.vcodec1_clks = { "vcodec1_core", "vcodec1_bus" },
+ 	.vcodec_clks_num = 2,
+-	.vcodec_pmdomains = (const char *[]) { "venus", "vcodec0" },
+-	.vcodec_pmdomains_num = 2,
++	.vcodec_pmdomains = (const char *[]) { "venus", "vcodec0", "vcodec1" },
++	.vcodec_pmdomains_num = 3,
+ 	.opp_pmdomain = (const char *[]) { "cx" },
+ 	.opp_pmdomain_num = 1,
+ 	.vcodec_num = 1,
++	.vcodec1_with_vcodec0 = true,
+ 	.hfi_version = HFI_VERSION_4XX,
+ 	.vpu_version = VPU_VERSION_AR50,
+ 	.vmem_id = VIDC_RESOURCE_NONE,
+@@ -1099,6 +1105,7 @@ static const struct venus_resources sm7250_res = {
+ 	.cp_nonpixel_size = 0x24800000,
+ 	.fwname = "venus.mdt",
+ 	.dec_nodename = "video-decoder",
++	.enc_nodename = "video-encoder",
+ };
+ 
+ #if (!IS_ENABLED(CONFIG_VIDEO_QCOM_IRIS))
+diff --git a/drivers/media/platform/qcom/venus/core.h b/drivers/media/platform/qcom/venus/core.h
+index 93fa77f05..4ecddfd5d 100644
+--- a/drivers/media/platform/qcom/venus/core.h
++++ b/drivers/media/platform/qcom/venus/core.h
+@@ -9,6 +9,7 @@
+ 
+ #include <linux/bitops.h>
+ #include <linux/dma-mapping.h>
++#include <linux/genalloc.h>
+ #include <linux/list.h>
+ #include <media/videobuf2-v4l2.h>
+ #include <media/v4l2-ctrls.h>
+@@ -111,6 +112,11 @@ struct venus_resources {
+ 	const char *enc_nodename;
+ 	const char *dec_nodename;
+ 	const struct firmware_version *min_fw;
++	/*
++	 * IRIS1: the encoder pre-processes input (VPSS) on the CVP core, which
++	 * is vcodec1: power it whenever vcodec0 is powered.
++	 */
++	bool vcodec1_with_vcodec0;
+ };
+ 
+ enum venus_fmt {
+@@ -229,6 +235,20 @@ struct venus_core {
+ 		phys_addr_t mem_phys;
+ 		size_t mem_size;
+ 	} fw;
++	/*
++	 * Secure non-pixel context bank (IRIS1): the encoder's CVP core reads
++	 * INTERNAL_PERSIST through it. Memory owned by @vmid, mapped once at
++	 * @iova; @pool hands out pieces of it.
++	 */
++	struct venus_secnp {
++		struct device *dev;
++		struct iommu_domain *iommu_domain;
++		struct gen_pool *pool;
++		phys_addr_t phys;
++		size_t size;
++		dma_addr_t iova;
++		u32 vmid;
++	} secnp;
+ 	struct mutex lock;
+ 	struct list_head instances;
+ 	atomic_t insts_count;
+diff --git a/drivers/media/platform/qcom/venus/firmware.c b/drivers/media/platform/qcom/venus/firmware.c
+index 3a38ff985..7e2b0338a 100644
+--- a/drivers/media/platform/qcom/venus/firmware.c
++++ b/drivers/media/platform/qcom/venus/firmware.c
+@@ -365,6 +365,139 @@ int venus_firmware_init(struct venus_core *core)
+ 	return ret;
+ }
+ 
++/* inside the content-protection non-pixel range TZ sets up (cp_nonpixel_*) */
++#define VENUS_SECNP_IOVA	0x10000000
++
++static int venus_secnp_assign(struct venus_core *core, bool to_vm)
++{
++	struct venus_secnp *s = &core->secnp;
++	struct qcom_scm_vmperm perm = {
++		.vmid = to_vm ? s->vmid : QCOM_SCM_VMID_HLOS,
++		.perm = to_vm ? QCOM_SCM_PERM_RW : QCOM_SCM_PERM_RWX,
++	};
++	u64 src = to_vm ? BIT(QCOM_SCM_VMID_HLOS) : BIT(s->vmid);
++
++	return qcom_scm_assign_mem(s->phys, s->size, &src, &perm, 1);
++}
++
++/*
++ * IRIS1 (SM7250): the encoder's CVP core reads its INTERNAL_PERSIST buffer
++ * through the secure non-pixel stream ID, even in a non-secure session, as
++ * downstream allocates it (CP_NON_PIXEL). Give that stream ID its own domain
++ * ("non-pixel" child: iommus, qcom,iommu-vmid, memory-region), hand a no-map
++ * carveout to the VM and map it once; encoder PERSIST buffers come from it.
++ * Without it the encoder is not registered (see venc_probe()).
++ */
++void venus_secnp_init(struct venus_core *core)
++{
++	struct venus_secnp *s = &core->secnp;
++	struct platform_device_info info = {};
++	struct device *dev = core->dev;
++	struct platform_device *pdev;
++	struct iommu_domain *domain;
++	struct device_node *np, *mem;
++	struct reserved_mem *rmem;
++	int ret;
++
++	np = of_get_child_by_name(dev->of_node, "non-pixel");
++	if (!np)
++		return;
++
++	mem = of_parse_phandle(np, "memory-region", 0);
++	rmem = mem ? of_reserved_mem_lookup(mem) : NULL;
++	of_node_put(mem);
++	if (!rmem || of_property_read_u32(np, "qcom,iommu-vmid", &s->vmid)) {
++		dev_err(dev, "non-pixel: needs memory-region and qcom,iommu-vmid\n");
++		goto put_node;
++	}
++
++	info.fwnode = &np->fwnode;
++	info.parent = dev;
++	info.name = np->name;
++	info.dma_mask = DMA_BIT_MASK(32);
++	pdev = platform_device_register_full(&info);
++	if (IS_ERR(pdev))
++		goto put_node;
++	pdev->dev.of_node = np;
++
++	ret = of_dma_configure(&pdev->dev, np, true);
++	if (ret)
++		goto err_unregister;
++
++	domain = iommu_paging_domain_alloc(&pdev->dev);
++	if (IS_ERR(domain)) {
++		ret = PTR_ERR(domain);
++		goto err_unregister;
++	}
++	ret = iommu_attach_device(domain, &pdev->dev);
++	if (ret)
++		goto err_domain_free;
++
++	s->phys = rmem->base;
++	s->size = rmem->size;
++	s->iova = VENUS_SECNP_IOVA;
++	ret = venus_secnp_assign(core, true);
++	if (ret)
++		goto err_detach;
++
++	ret = iommu_map(domain, s->iova, s->phys, s->size,
++			IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
++	if (ret)
++		goto err_unassign;
++
++	s->pool = gen_pool_create(PAGE_SHIFT, -1);
++	if (!s->pool) {
++		ret = -ENOMEM;
++		goto err_unmap;
++	}
++	ret = gen_pool_add(s->pool, s->iova, s->size, -1);
++	if (ret)
++		goto err_pool;
++
++	s->dev = &pdev->dev;
++	s->iommu_domain = domain;
++	of_node_put(np);
++	dev_info(dev, "non-pixel bank: %zu KiB for VM %u\n", s->size / SZ_1K, s->vmid);
++	return;
++
++err_pool:
++	gen_pool_destroy(s->pool);
++	s->pool = NULL;
++err_unmap:
++	iommu_unmap(domain, s->iova, s->size);
++err_unassign:
++	if (venus_secnp_assign(core, false))
++		dev_err(dev, "non-pixel: carveout stays with VM %u\n", s->vmid);
++err_detach:
++	iommu_detach_device(domain, &pdev->dev);
++err_domain_free:
++	iommu_domain_free(domain);
++err_unregister:
++	platform_device_unregister(pdev);
++	dev_err(dev, "non-pixel bank failed: %d\n", ret);
++put_node:
++	of_node_put(np);
++}
++
++void venus_secnp_deinit(struct venus_core *core)
++{
++	struct venus_secnp *s = &core->secnp;
++
++	if (!s->dev)
++		return;
++
++	/* all sessions are gone: every buffer is back in the pool */
++	gen_pool_destroy(s->pool);
++	s->pool = NULL;
++	iommu_unmap(s->iommu_domain, s->iova, s->size);
++	if (venus_secnp_assign(core, false))
++		dev_err(core->dev, "non-pixel: carveout stays with VM %u\n", s->vmid);
++	iommu_detach_device(s->iommu_domain, s->dev);
++	iommu_domain_free(s->iommu_domain);
++	platform_device_unregister(to_platform_device(s->dev));
++	s->dev = NULL;
++}
++
+ void venus_firmware_deinit(struct venus_core *core)
+ {
+ 	struct iommu_domain *iommu;
+diff --git a/drivers/media/platform/qcom/venus/firmware.h b/drivers/media/platform/qcom/venus/firmware.h
+index 87e1d922b..14c6b9193 100644
+--- a/drivers/media/platform/qcom/venus/firmware.h
++++ b/drivers/media/platform/qcom/venus/firmware.h
+@@ -14,6 +14,8 @@ int venus_firmware_cfg(struct venus_core *core);
+ int venus_boot(struct venus_core *core);
+ int venus_shutdown(struct venus_core *core);
+ int venus_set_hw_state(struct venus_core *core, bool suspend);
++void venus_secnp_init(struct venus_core *core);
++void venus_secnp_deinit(struct venus_core *core);
+ 
+ static inline int venus_set_hw_state_suspend(struct venus_core *core)
+ {
+diff --git a/drivers/media/platform/qcom/venus/helpers.c b/drivers/media/platform/qcom/venus/helpers.c
+index 59eee3dd9..456a6e4bb 100644
+--- a/drivers/media/platform/qcom/venus/helpers.c
++++ b/drivers/media/platform/qcom/venus/helpers.c
+@@ -34,6 +34,7 @@ struct intbuf {
+ 	void *va;
+ 	dma_addr_t da;
+ 	unsigned long attrs;
++	bool secnp;	/* from core->secnp.pool, not dma_alloc_attrs() */
+ 	enum dpb_buf_owner owned_by;
+ 	u32 dpb_out_tag;
+ };
+@@ -230,6 +231,44 @@ int venus_helper_alloc_dpb_bufs(struct venus_inst *inst)
+ }
+ EXPORT_SYMBOL_GPL(venus_helper_alloc_dpb_bufs);
+ 
++/* downstream: an encoder's INTERNAL_PERSIST is always CP_NON_PIXEL memory */
++static bool intbuf_is_secnp(struct venus_inst *inst, u32 type)
++{
++	return inst->core->secnp.pool &&
++	       inst->session_type == VIDC_SESSION_TYPE_ENC &&
++	       type == HFI_BUFFER_INTERNAL_PERSIST;
++}
++
++static int intbuf_alloc(struct venus_inst *inst, struct intbuf *buf)
++{
++	struct venus_core *core = inst->core;
++
++	if (intbuf_is_secnp(inst, buf->type)) {
++		buf->da = gen_pool_alloc(core->secnp.pool, buf->size);
++		if (!buf->da) {
++			dev_err(core->dev, "non-pixel pool exhausted (%zu bytes)\n",
++				buf->size);
++			return -ENOMEM;
++		}
++		buf->secnp = true;
++		return 0;
++	}
++
++	buf->attrs = DMA_ATTR_WRITE_COMBINE | DMA_ATTR_NO_KERNEL_MAPPING;
++	buf->va = dma_alloc_attrs(core->dev, buf->size, &buf->da, GFP_KERNEL,
++				  buf->attrs);
++	return buf->va ? 0 : -ENOMEM;
++}
++
++static void intbuf_free(struct venus_inst *inst, struct intbuf *buf)
++{
++	if (buf->secnp)
++		gen_pool_free(inst->core->secnp.pool, buf->da, buf->size);
++	else
++		dma_free_attrs(inst->core->dev, buf->size, buf->va, buf->da,
++			       buf->attrs);
++}
++
+ static int intbufs_set_buffer(struct venus_inst *inst, u32 type)
+ {
+ 	struct venus_core *core = inst->core;
+@@ -256,14 +295,9 @@ static int intbufs_set_buffer(struct venus_inst *inst, u32 type)
+ 
+ 		buf->type = bufreq.type;
+ 		buf->size = bufreq.size;
+-		buf->attrs = DMA_ATTR_WRITE_COMBINE |
+-			     DMA_ATTR_NO_KERNEL_MAPPING;
+-		buf->va = dma_alloc_attrs(dev, buf->size, &buf->da, GFP_KERNEL,
+-					  buf->attrs);
+-		if (!buf->va) {
+-			ret = -ENOMEM;
++		ret = intbuf_alloc(inst, buf);
++		if (ret)
+ 			goto fail;
+-		}
+ 
+ 		memset(&bd, 0, sizeof(bd));
+ 		bd.buffer_size = buf->size;
+@@ -283,7 +317,7 @@ static int intbufs_set_buffer(struct venus_inst *inst, u32 type)
+ 	return 0;
+ 
+ dma_free:
+-	dma_free_attrs(dev, buf->size, buf->va, buf->da, buf->attrs);
++	intbuf_free(inst, buf);
+ fail:
+ 	kfree(buf);
+ 	return ret;
+@@ -305,8 +339,7 @@ static int intbufs_unset_buffers(struct venus_inst *inst)
+ 		ret = hfi_session_unset_buffers(inst, &bd);
+ 
+ 		list_del_init(&buf->list);
+-		dma_free_attrs(inst->core->dev, buf->size, buf->va, buf->da,
+-			       buf->attrs);
++		intbuf_free(inst, buf);
+ 		kfree(buf);
+ 	}
+ 
+@@ -395,8 +428,7 @@ int venus_helper_intbufs_realloc(struct venus_inst *inst)
+ 
+ 		ret = hfi_session_unset_buffers(inst, &bd);
+ 
+-		dma_free_attrs(inst->core->dev, buf->size, buf->va, buf->da,
+-			       buf->attrs);
++		intbuf_free(inst, buf);
+ 
+ 		list_del_init(&buf->list);
+ 		kfree(buf);
+diff --git a/drivers/media/platform/qcom/venus/pm_helpers.c b/drivers/media/platform/qcom/venus/pm_helpers.c
+index e88e66be4..7a6bfcab8 100644
+--- a/drivers/media/platform/qcom/venus/pm_helpers.c
++++ b/drivers/media/platform/qcom/venus/pm_helpers.c
+@@ -593,6 +593,9 @@ static int poweroff_coreid(struct venus_core *core, unsigned int coreid_mask)
+ {
+ 	int ret;
+ 
++	if (core->res->vcodec1_with_vcodec0 && (coreid_mask & VIDC_CORE_ID_1))
++		coreid_mask |= VIDC_CORE_ID_2;
++
+ 	if (coreid_mask & VIDC_CORE_ID_1) {
+ 		ret = vcodec_control_v4(core, VIDC_CORE_ID_1, true);
+ 		if (ret)
+@@ -636,6 +639,9 @@ static int poweron_coreid(struct venus_core *core, unsigned int coreid_mask)
+ {
+ 	int ret;
+ 
++	if (core->res->vcodec1_with_vcodec0 && (coreid_mask & VIDC_CORE_ID_1))
++		coreid_mask |= VIDC_CORE_ID_2;
++
+ 	if (coreid_mask & VIDC_CORE_ID_1) {
+ 		ret = pm_runtime_get_sync(core->pmdomains->pd_devs[1]);
+ 		if (ret < 0)
+diff --git a/drivers/media/platform/qcom/venus/venc.c b/drivers/media/platform/qcom/venus/venc.c
+index 79acf7c1e..fbf1cee6d 100644
+--- a/drivers/media/platform/qcom/venus/venc.c
++++ b/drivers/media/platform/qcom/venus/venc.c
+@@ -1565,6 +1565,12 @@ static int venc_probe(struct platform_device *pdev)
+ 	if (!core)
+ 		return -EINVAL;
+ 
++	/* without it the first encoded frame freezes the SoC */
++	if (core->res->vcodec1_with_vcodec0 && !core->secnp.pool) {
++		dev_err(dev, "no secure non-pixel bank: encoder disabled\n");
++		return -ENODEV;
++	}
++
+ 	platform_set_drvdata(pdev, core);
+ 
+ 	if (core->pm_ops->venc_get) {
