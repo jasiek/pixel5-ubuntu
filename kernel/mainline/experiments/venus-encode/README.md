@@ -43,3 +43,7 @@ pattern) and with the Venus decoder.
 A secure non-pixel context bank in the Venus binding and driver, PERSIST
 allocated from it for IRIS1 encoder sessions, patch 0015 and the DT back to
 encoder + vcodec1, and no `DBG` prints or fixed IOVA allocator.
+
+Done in Test 249: local patches 0016 (iommu/arm-smmu-qcom) and 0017 (venus)
+plus the board DT replace everything here; the files stay as the record of
+how the cause was found.
