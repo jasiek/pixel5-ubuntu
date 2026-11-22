@@ -146,7 +146,11 @@ Research: `docs/research/video.md` (IRIS1 core, SM8150-style videocc, TZ PAS 9).
   (MVS1); without MVS1 the first frame never completes, with MVS1 the SoC
   hangs in `LOAD_RESOURCES`. Untested: downstream IRIS1 power-on writes
   (`CGC_DIS`, `CLOCK_CONFIG`, `HFI_DSP_QTBL`/`UC_REGION`), the IRIS1 work
-  route property, `cvp_disable`-style HFI controls.
+  route property, `cvp_disable`-style HFI controls. Tried since (Tests 225-234, all
+  no change): the CVP core powered and clocked (measured), downstream power order,
+  interrupt mask, CGC/clock config, work route 2, bitrate savings off, DSP queue
+  registers, no/both core-usage mask. Left: lito's `cvp-internal` mode (CDSP
+  fastcvpd shares the CVP core); parked unless that becomes available.
 - [x] **P8.4** H.264 decode through V4L2 (`v4l2h264dec`): bit-exact, about 200-230 fps at
   1080p with a third of libavcodec's CPU time (Tests 221-223).
 
