@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P7.2 gate (someone else flashes a phone from the README). Release `g0045cc71298c` on boot_b (Test 224: Venus decoder; Test 212: patch 0013, USB 172.16.43.1). Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Video (Phase 8): decode works and is flashed; encode works in release `geb76aa45a530` (P8.3, Test 249: patches 0016/0017, tethered only; flashing it to boot_b needs the owner). Open owner items: P7.2 gate, nairo licence.
+## ▶ RESUME HERE: P7.2 gate (someone else flashes a phone from the README). Release `geb76aa45a530` on boot_b (Test 250: Venus decoder and encoder; Test 212: patch 0013, USB 172.16.43.1). Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Video (Phase 8): decode works and is flashed; encode works and is flashed (P8.3, Tests 249-250: patches 0016/0017; power not measured). Open owner items: P7.2 gate, nairo licence.
 
 ---
 
@@ -156,7 +156,7 @@ Research: `docs/research/video.md` (IRIS1 core, SM8150-style videocc, TZ PAS 9).
   local patches 0016 (SMMU page tables shared with the VM) and 0017 (venus
   non-pixel bank, PERSIST pool, CVP power), release `geb76aa45a530`, no helper
   module: 720p 199-219 fps, 1080p 151-154 fps, output identical to the PoC.
-  Left: power not measured; release not on boot_b (needs a flash).
+  Flashed to boot_b (Test 250). Left: power not measured.
 - [x] **P8.4** H.264 decode through V4L2 (`v4l2h264dec`): bit-exact, about 200-230 fps at
   1080p with a third of libavcodec's CPU time (Tests 221-223).
 
