@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Added under /soc@0 of the encoder test DTB (Tests 235-248, with fdtput):
+ * Venus' secure stream IDs, each in its own context bank, bound by seccb.ko.
+ * Only venus-sec-np (secure non-pixel, VMID 0xb) was exercised.
+ */
+venus-sec-np {
+	compatible = "pixel5,smmu-secure-cb";
+	iommus = <&apps_smmu 0x1304 0xe0>;
+	pixel5,vmid = <0x0b>;
+};
+
+venus-sec-px {
+	compatible = "pixel5,smmu-secure-cb";
+	iommus = <&apps_smmu 0x1303 0xe0>;
+	pixel5,vmid = <0x0a>;
+};
+
+venus-sec-bs {
+	compatible = "pixel5,smmu-secure-cb";
+	iommus = <&apps_smmu 0x1361 0x4>;
+	pixel5,vmid = <0x09>;
+};

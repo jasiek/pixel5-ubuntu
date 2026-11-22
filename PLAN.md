@@ -2,7 +2,7 @@
 
 **Goal:** the Pixel 5 (redfin, SM7250) powers on straight into plain Ubuntu 24.04 arm64, reachable over SSH (USB and wifi). No Android at runtime. Same approach as the Pixel 2 project (`../ubuntu-touch-pixel2`): everything built from source, pinned submodules, rootfs on userdata.
 
-## ▶ RESUME HERE: P7.2 gate (someone else flashes a phone from the README). Release `g0045cc71298c` on boot_b (Test 224: Venus decoder; Test 212: patch 0013, USB 172.16.43.1). Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Video (Phase 8): decode works and is flashed; encode parked (P8.3: VPSS on the CVP core stalls, Tests 214-234). Open owner items: P7.2 gate, nairo licence.
+## ▶ RESUME HERE: P7.2 gate (someone else flashes a phone from the README). Release `g0045cc71298c` on boot_b (Test 224: Venus decoder; Test 212: patch 0013, USB 172.16.43.1). Suspend accepted at 47 mA (AOSS sleep open, Tests 204-210). Video (Phase 8): decode works and is flashed; encode works as a proof of concept (P8.3, Tests 235-248: PERSIST via the secure non-pixel SMMU stream); real implementation next. Open owner items: P7.2 gate, nairo licence.
 
 ---
 
@@ -149,8 +149,11 @@ Research: `docs/research/video.md` (IRIS1 core, SM8150-style videocc, TZ PAS 9).
   route property, `cvp_disable`-style HFI controls. Tried since (Tests 225-234, all
   no change): the CVP core powered and clocked (measured), downstream power order,
   interrupt mask, CGC/clock config, work route 2, bitrate savings off, DSP queue
-  registers, no/both core-usage mask. Left: lito's `cvp-internal` mode (CDSP
-  fastcvpd shares the CVP core); parked unless that becomes available.
+  registers, no/both core-usage mask. **Cause found (Tests 235-248):** the CVP core
+  reads the encoder's INTERNAL_PERSIST buffer through the secure non-pixel SMMU
+  stream (0x1384, VMID 0xB); proof of concept encodes 1080p at about 150 fps
+  (`kernel/mainline/experiments/venus-encode/`). Next: a real implementation
+  (secure non-pixel context bank in the Venus binding/driver, PERSIST from it).
 - [x] **P8.4** H.264 decode through V4L2 (`v4l2h264dec`): bit-exact, about 200-230 fps at
   1080p with a third of libavcodec's CPU time (Tests 221-223).
 
